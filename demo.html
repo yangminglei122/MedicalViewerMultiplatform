@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>演示 · 医学影像浏览器</title>
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div id="app">
+  <header id="topbar">
+    <div class="logo"><svg class="icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 4v16M4 12h16"/></svg><span class="title">医学影像浏览器 · 演示</span></div>
+    <div class="spacer"></div>
+    <button class="btn primary" id="btn-gen">生成演示数据并查看</button>
+    <a class="btn ghost" href="index.html">返回主页</a>
+  </header>
+  <main>
+    <section id="page-viewer">
+      <div id="vtoolbar"></div>
+      <div id="vmain">
+        <aside id="vseries"></aside>
+        <div id="vpanes-wrap"><div id="vpanes" class="panes layout-1"></div></div>
+      </div>
+      <div id="vbottom">
+        <span class="inst" id="inst-label">-</span>
+        <input type="range" id="inst-slider" min="1" max="1" value="1">
+        <button class="btn sm" id="cine-btn">▶ 播放</button>
+        <select id="cine-fps" class="input" style="width:70px"><option>8</option><option selected>12</option><option>24</option></select>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script src="js/vendor/pako.min.js?v=14"></script>
+<script src="js/vendor/charls.js?v=14"></script>
+<script type="module">
+import("./js/vendor/jpeg-lossless.js").then(m => { window.__jpegLossless = m; }).catch(() => { });
+</script>
+<script src="js/util.js?v=14"></script>
+<script src="js/dicom.js?v=14"></script>
+<script src="js/decoder.js?v=14"></script>
+<script src="js/viewer.js?v=14"></script>
+<script src="js/dev-gen.js?v=14"></script>
+<script>
+(function () {
+  const U = MV.U;
+  let viewer = null, stacks = [];
+
+  function buildStack(files, seriesDesc, seriesNo) {
+    const list = files.map((f) => ({
+      sop: null, instNo: null, frames: 1,
+      _bytes: f.bytes,
+      getBytes: async function () { return this._bytes; }
+    }));
+    const st = new MV.viewer.Stack({ uid: 'demo' + seriesNo, number: seriesNo, desc: seriesDesc, modality: '', files: list });
+    return st;
+  }
+
+  async function run() {
+    const btn = U.$('#btn-gen');
+    btn.disabled = true; btn.textContent = '生成中…';
+    await new Promise((r) => setTimeout(r, 30));
+    try {
+      const files = await MV.gen.generate();
+      btn.textContent = '已生成 ' + files.length + ' 个文件';
+      await view(files);
+    } catch (e) {
+      btn.disabled = false; btn.textContent = '生成失败,点击重试';
+      console.error(e);
+      U.toast('生成失败: ' + (e && e.message || e), 'error');
+    }
+  }
+
+  async function view(files) {
+    // 解析头部获取 sop/instNo
+    for (const f of files) {
+      const ds = MV.dicom.parse(f.bytes);
+      f._ds = ds;
+    }
+    const ctFiles = files.filter((f) => f.name.startsWith('CT_')).sort((a, b) => a.name < b.name ? -1 : 1);
+    const mrFiles = files.filter((f) => f.name.startsWith('MR_')).sort((a, b) => a.name < b.name ? -1 : 1);
+    [ctFiles, mrFiles].forEach((arr, si) => {
+      arr.forEach((f) => {
+        f._sop = f._ds.str(MV.TAG.SOPInstanceUID);
+        f._no = parseInt(f._ds.str(MV.TAG.InstanceNumber)) || 0;
+      });
+    });
+    const mk = (arr, desc, no) => new MV.viewer.Stack({
+      uid: 'demo' + no, number: no, desc: desc, modality: '',
+      files: arr.map((f) => ({ sop: f._sop, instNo: f._no, frames: 1, getBytes: async () => f.bytes }))
+    });
+    stacks = [mk(ctFiles, 'CT 胸部 AXIAL 5mm (32层)', 2), mk(mrFiles, 'MR 头颅 T1 FLAIR (24层)', 3)];
+
+    viewer = new MV.viewer.Viewer(U.$('#vpanes'), { onstate: onState });
+    buildToolbar();
+    buildSeriesList();
+    viewer.setSeries(stacks[0], 0);
+    bindBottom();
+  }
+
+  function onState(s) {
+    if (!s) return;
+    U.$('#inst-label').textContent = '图像 ' + s.idx + '/' + s.total + ' · WC ' + Math.round(s.wl) + '/WW ' + Math.round(s.ww);
+    const sl = U.$('#inst-slider');
+    sl.max = s.total; sl.value = s.idx;
+    U.$('#cine-btn').textContent = s.cine ? '⏸ 暂停' : '▶ 播放';
+  }
+
+  const TOOLS = [
+    ['wl', 'contrast', '调窗'], ['pan', 'pan', '平移'], ['zoom', 'zoom', '缩放'], ['scroll', 'scroll', '滚动'],
+    ['length', 'ruler', '长度'], ['angle', 'angle', '角度'], ['rect', 'rect', '矩形'], ['ellipse', 'ellipse', '椭圆'],
+    ['probe', 'probe', '像素'], ['arrow', 'arrow', '箭头'], ['text', 'text', '文字']
+  ];
+  function buildToolbar() {
+    const bar = U.$('#vtoolbar');
+    bar.innerHTML = '';
+    TOOLS.forEach(([id, icon, label], i) => {
+      const b = U.el('button', { class: 'tool-btn' + (i === 0 ? ' active' : ''), title: label, html: U.icon(icon) + '<span class="lbl">' + label + '</span>' });
+      b.onclick = () => {
+        viewer.setTool(id);
+        U.$$('.tool-btn', bar).forEach((x) => x.classList.remove('active'));
+        b.classList.add('active');
+      };
+      if (i === 3) bar.appendChild(U.el('div', { class: 'vsep' }));
+      bar.appendChild(b);
+    });
+    bar.appendChild(U.el('div', { class: 'vsep' }));
+    const mkBtn = (icon, label, fn) => {
+      const b = U.el('button', { class: 'tool-btn', title: label, html: U.icon(icon) + '<span class="lbl">' + label + '</span>' });
+      b.onclick = fn; bar.appendChild(b); return b;
+    };
+    mkBtn('invert', '反色', () => viewer.invert());
+    mkBtn('rotateL', '左旋', () => viewer.rotate(-1));
+    mkBtn('rotateR', '右旋', () => viewer.rotate(1));
+    mkBtn('flipH', '水平翻', () => viewer.flipH());
+    mkBtn('reset', '复位', () => viewer.reset());
+    bar.appendChild(U.el('div', { class: 'vsep' }));
+    [['脑窗', 40, 80], ['肺窗', -600, 1500], ['骨窗', 480, 2500], ['软组织', 40, 400]].forEach(([n, c, w]) => {
+      const b = U.el('button', { class: 'tool-btn warn', title: n, html: '<span class="lbl">' + n + '</span>' });
+      b.onclick = () => viewer.preset(c, w);
+      bar.appendChild(b);
+    });
+    bar.appendChild(U.el('div', { class: 'vsep' }));
+    [['layout1', '单图', 1], ['layout2', '双图', 2], ['layout4', '四图', 4]].forEach(([icon, label, n]) => {
+      const b = U.el('button', { class: 'tool-btn', title: label, html: U.icon(icon) + '<span class="lbl">' + label + '</span>' });
+      b.onclick = () => { viewer.buildLayout(n); buildSeriesList(); };
+      bar.appendChild(b);
+    });
+    mkBtn('image', '存PNG', () => viewer.exportPNG());
+  }
+
+  function buildSeriesList() {
+    const box = U.$('#vseries');
+    box.innerHTML = '';
+    stacks.forEach((st, i) => {
+      const img = U.el('img', { alt: '' });
+      const item = U.el('div', { class: 'series-item' + (viewer.panes.some((p) => p.stack === st) ? ' active' : '') }, [
+        img,
+        U.el('div', { class: 'sinfo' }, [
+          U.el('div', { class: 'sdesc', text: st.info.desc }),
+          U.el('div', { class: 'ssub', text: st.images.length + ' 幅' })
+        ])
+      ]);
+      item.onclick = () => { viewer.setSeries(st); buildSeriesList(); };
+      box.appendChild(item);
+      // 缩略图
+      st.instance(st.files[0]).then((inst) => inst.dec.getFrame(0)).then((fr) => {
+        const c = document.createElement('canvas');
+        const s = 56 / Math.max(fr.rows, fr.cols);
+        c.width = Math.max(1, Math.round(fr.cols * s)); c.height = Math.max(1, Math.round(fr.rows * s));
+        const cx = c.getContext('2d');
+        const id = cx.createImageData(c.width, c.height);
+        const src = fr.pixels, n = c.width * c.height;
+        const lut = st.header ? null : null;
+        for (let i2 = 0, j = 0; i2 < n; i2++, j += 4) {
+          const sy = Math.floor((i2 / c.width) * fr.rows) | 0, sx = Math.floor((i2 % c.width) * fr.cols / c.width) | 0;
+          const v = src[sy * fr.cols + sx] >> 8;
+          id.data[j] = id.data[j + 1] = id.data[j + 2] = v; id.data[j + 3] = 255;
+        }
+        cx.putImageData(id, 0, 0);
+        img.src = c.toDataURL();
+      }).catch(() => { });
+    });
+  }
+
+  function bindBottom() {
+    U.$('#inst-slider').oninput = (e) => viewer.gotoImage(+e.target.value);
+    U.$('#cine-btn').onclick = () => viewer.cineToggle();
+    U.$('#cine-fps').onchange = (e) => viewer.cineSetFps(+e.target.value);
+  }
+
+  U.$('#btn-gen').onclick = run;
+})();
+</script>
+</body>
+</html>

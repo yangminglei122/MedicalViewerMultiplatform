@@ -1,0 +1,7 @@
+<?php
+/**
+ * 配置示例:复制为 config.php 后按需修改
+ */
+define('MV_USER', 'admin');          // 登录用户名,留 '' 关闭登录
+define('MV_PASS', 'change-me');      // 登录密码
+// define('MV_DATA_DIR', '/volume1/medicalviewer-data');  // 数据存储目录(默认 data/)
