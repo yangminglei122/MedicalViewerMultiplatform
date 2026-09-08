@@ -106,6 +106,17 @@ function mv_index_save($idx) {
     @rename($tmp, MV_INDEX_FILE);
 }
 
+/* 索引变更排他锁: 防止并发 commit/删除互相覆盖 */
+function mv_index_lock() {
+    $fp = @fopen(MV_DATA_DIR . '/.index.lock', 'c');
+    if (!$fp) mv_fail('无法打开索引锁', 500);
+    flock($fp, LOCK_EX);
+    return $fp;
+}
+function mv_index_unlock($fp) {
+    if ($fp) { flock($fp, LOCK_UN); fclose($fp); }
+}
+
 /* ---------------- 账号与认证 ----------------
  * 账号存于 data/accounts.json; 首次访问自动创建管理员(用户名/密码取 config.php 的 MV_USER/MV_PASS, 默认 admin/admin)。
  * 临时账号由管理员创建, 带 expires 到期时间, 到期即失效。
@@ -207,7 +218,8 @@ function mv_zip_extract_dicom($zipPath, $outDir) {
             $dataOff = $e['lho'] + 30 + $lhe['nl'] + $lhe['el'];
 
             // 流式解压该条目到暂存目录(大文件不载入内存)
-            $id = sprintf('%04d', $n);
+            // id 用随机 hex: 同一批次上传多个 ZIP 时顺序 id(0000…)会互相覆盖
+            $id = bin2hex(random_bytes(6));
             $outPath = $outDir . '/' . $id . '.dcm';
             $fo = @fopen($outPath, 'wb');
             if (!$fo) continue;
@@ -280,6 +292,11 @@ function mv_dos_time($ts) {
 /** $files: [{path:磁盘路径, name:zip内路径}]; 流式输出 zip 到响应 */
 function mv_zip_stream_out($files, $zipName) {
     $zipName = mv_safe_name($zipName) . '.zip';
+    // 清空所有输出缓冲(Apache/zlib.output_compression 会破坏流式 zip 与 Content-Disposition)
+    while (ob_get_level() > 0) { @ob_end_clean(); }
+    if (ini_get('zlib.output_compression')) {
+        @ini_set('zlib.output_compression', '0');
+    }
     header('Content-Type: application/zip');
     header("Content-Disposition: attachment; filename*=UTF-8''" . rawurlencode($zipName));
     header('Cache-Control: no-store');
@@ -647,6 +664,7 @@ try {
             $usedBatches = array();
             $patient = isset($j['patient']) ? $j['patient'] : array();
 
+            $lock = mv_index_lock();
             $idx = mv_index_load();
             $pat = &mv_find_patient($idx, isset($patient['id']) ? $patient['id'] : '', isset($patient['name']) ? $patient['name'] : '', isset($patient['birth']) ? $patient['birth'] : '');
             // 以确认后的信息为准
@@ -724,6 +742,7 @@ try {
             }
             unset($pat);
             mv_index_save($idx);
+            mv_index_unlock($lock);
             // 清理已空的批次目录;非空批次(含其他待导入文件)留给 GC 兜底
             foreach (array_keys($usedBatches) as $b) {
                 $d = MV_TMP_DIR . '/' . $b;
@@ -740,6 +759,7 @@ try {
             $j = mv_body_json();
             $uid = isset($j['uid']) ? $j['uid'] : '';
             if ($uid === '') mv_fail('缺少 uid');
+            $lock = mv_index_lock();
             $idx = mv_index_load();
             foreach ($idx['patients'] as $pi => $p) {
                 foreach ($p['studies'] as $si => $st) {
@@ -751,9 +771,11 @@ try {
                         array_splice($idx['patients'], $pi, 1);
                     }
                     mv_index_save($idx);
+                    mv_index_unlock($lock);
                     mv_json(array('ok' => true));
                 }
             }
+            mv_index_unlock($lock);
             mv_fail('未找到该检查', 404);
             break;
         }
@@ -762,12 +784,14 @@ try {
             $j = mv_body_json();
             $dir = isset($j['dir']) ? $j['dir'] : '';
             if (!mv_check_id($dir)) mv_fail('非法参数');
+            $lock = mv_index_lock();
             $idx = mv_index_load();
             foreach ($idx['patients'] as $pi => $p) {
                 if ($p['dir'] !== $dir) continue;
                 mv_rmrf(MV_FILES_DIR . '/' . $dir);
                 array_splice($idx['patients'], $pi, 1);
                 mv_index_save($idx);
+                mv_index_unlock($lock);
                 mv_json(array('ok' => true));
             }
             mv_fail('未找到该患者', 404);
@@ -778,6 +802,7 @@ try {
             $j = mv_body_json();
             $dir = isset($j['dir']) ? $j['dir'] : '';
             if (!mv_check_id($dir)) mv_fail('非法参数');
+            $lock = mv_index_lock();
             $idx = mv_index_load();
             foreach ($idx['patients'] as &$p) {
                 if ($p['dir'] !== $dir) continue;
@@ -785,9 +810,11 @@ try {
                     if (isset($j[$k])) $p[$k] = trim((string)$j[$k]);
                 }
                 mv_index_save($idx);
+                mv_index_unlock($lock);
                 mv_json(array('ok' => true));
             }
             unset($p);
+            mv_index_unlock($lock);
             mv_fail('未找到该患者', 404);
             break;
         }

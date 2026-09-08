@@ -258,7 +258,8 @@
       data = groupOrStudy;
     }
     app.studyData = data;
-    location.hash = '#/local';
+    // replaceState 不触发 hashchange; 若用 location.hash 会引发路由回到列表页, 把预览视图立即拆掉
+    history.replaceState(null, '', '#/local');
     buildViewerPage([data]);
   }
 

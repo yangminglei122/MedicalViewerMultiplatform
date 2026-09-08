@@ -159,6 +159,8 @@
       let curBatch = batch;
       let result = null;
       let attempt = 0;   // 当前块的重试次数
+      let restarts = 0;  // 整文件换批重传次数(防极端死循环)
+      const maxRestarts = 3;
 
       for (let i = 0; i < total; ) {
         const chunk = blob.slice(i * CHUNK, Math.min((i + 1) * CHUNK, blob.size));
@@ -171,14 +173,9 @@
         } catch (e) {
           const msg = e && e.message || '';
           attempt++;
-          if (/批次不存在/.test(msg)) {
-            // 服务器端批次被清理 → 换新批次从头传
-            try { curBatch = (await this.tmpbegin()).batch; } catch (e2) { throw e; }
-            i = 0; attempt = 0;
-            continue;
-          }
-          if (/乱序/.test(msg)) {
-            // 服务端进度领先/落后 → 重传整文件到新批次
+          if (/批次不存在/.test(msg) || /乱序/.test(msg)) {
+            // 服务器端批次被清理/进度错位 → 换新批次从头重传
+            if (++restarts > maxRestarts) throw e;
             try { curBatch = (await this.tmpbegin()).batch; } catch (e2) { throw e; }
             i = 0; attempt = 0;
             continue;
