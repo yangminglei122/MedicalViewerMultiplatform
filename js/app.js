@@ -416,7 +416,7 @@
     const crossBtn = U.el('button', {
       class: 'tool-btn warn' + (MV.mprCrosshair !== false ? ' active' : ''),
       title: 'MPR 十字线: 显示/隐藏三平面参考线(隐藏后仍可点击/拖动定位)',
-      html: U.icon('search') + '<span class="lbl">十字线</span>'
+      html: U.icon('crosshair') + '<span class="lbl">十字线</span>'
     });
     crossBtn.onclick = () => {
       MV.mprCrosshair = MV.mprCrosshair === false ? true : false;

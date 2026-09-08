@@ -24,13 +24,13 @@ input[type="date"] {
 }
 input[type="date"]:hover { border-color: #4a5a74; }
 input[type="date"]::-webkit-calendar-picker-indicator {
-  filter: invert(1) brightness(1.55);
+  filter: invert(1);
   opacity: 1;
   width: 17px;
   height: 17px;
   cursor: pointer;
 }
-input[type="date"]:hover::-webkit-calendar-picker-indicator { filter: invert(1) brightness(2); }
+input[type="date"]:hover::-webkit-calendar-picker-indicator { filter: invert(1); transform: scale(1.12); }
 input[type="date"]::-webkit-datetime-edit,
 input[type="date"]::-webkit-datetime-edit-text,
 input[type="date"]::-webkit-datetime-edit-year-field,
