@@ -244,8 +244,8 @@ main { flex: 1; min-height: 0; }
 #page-viewer { display: flex; flex-direction: column; height: 100%; }
 
 #vtoolbar {
-  display: flex; align-items: center; gap: 4px;
-  padding: 6px 10px; background: var(--panel);
+  display: flex; align-items: center; gap: 2px;
+  padding: 5px 6px; background: var(--panel);
   border-bottom: 1px solid var(--border);
   overflow-x: auto; scrollbar-width: none; flex-shrink: 0;
   position: relative;
@@ -254,21 +254,21 @@ main { flex: 1; min-height: 0; }
 /* 溢出提示: 右缘渐隐(说明还有更多按钮可横向滚动) */
 #vtoolbar::after {
   content: ''; position: sticky; right: 0; top: 0; flex-shrink: 0;
-  width: 18px; height: 46px; margin-left: -18px;
+  width: 16px; height: 44px; margin-left: -16px;
   background: linear-gradient(90deg, transparent, var(--panel) 70%);
   pointer-events: none;
 }
 .tool-btn {
   display: inline-flex; flex-direction: column; align-items: center; justify-content: center;
-  min-width: 52px; height: 46px; padding: 2px 6px;
-  background: transparent; border: none; border-radius: 8px;
-  color: var(--muted); cursor: pointer; gap: 1px;
+  min-width: 40px; height: 42px; padding: 2px 3px;
+  background: transparent; border: none; border-radius: 7px;
+  color: var(--muted); cursor: pointer; gap: 0;
 }
-.tool-btn .lbl { font-size: 10.5px; line-height: 1.2; }
+.tool-btn .lbl { font-size: 10px; line-height: 1.25; white-space: nowrap; }
 .tool-btn:hover { background: var(--panel2); color: var(--text); }
 .tool-btn.active { background: var(--accent-soft); color: var(--accent); }
 .tool-btn.warn.active { color: #ffb454; background: rgba(255, 180, 84, .12); }
-.vsep { width: 1px; height: 30px; background: var(--border); margin: 0 5px; flex-shrink: 0; }
+.vsep { width: 1px; height: 28px; background: var(--border); margin: 0 2px; flex-shrink: 0; }
 
 #vmain { flex: 1; display: flex; min-height: 0; }
 #vseries {
@@ -423,7 +423,7 @@ main { flex: 1; min-height: 0; }
   .wl-pat .row-actions { margin-left: auto; }
 
   /* 阅读器: 工具栏横向滚动 */
-  .tool-btn { min-width: 48px; }
+  .tool-btn { min-width: 38px; }
   #vmain { position: relative; }
   /* 层号滑条: 竖直贴右缘拉满高度 */
   #inst-slider {
@@ -453,7 +453,7 @@ main { flex: 1; min-height: 0; }
   .grid2, .grid3 { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 480px) {
-  .tool-btn { min-width: 44px; height: 44px; }
+  .tool-btn { min-width: 36px; height: 40px; }
   #topbar input.search { width: 100px; }
 }
 @media (hover: none) {

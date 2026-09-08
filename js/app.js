@@ -71,6 +71,7 @@
   }
 
   function showLibrary() {
+    exitMpr();
     if (app.viewer) { app.viewer.destroy(); app.viewer = null; }
     U.$('#page-viewer').classList.add('hidden');
     U.$('#page-library').classList.remove('hidden');
@@ -397,6 +398,7 @@
     });
     mprBtn.onclick = () => toggleMpr(mprBtn);
     bar.appendChild(mprBtn);
+    mprBtnRef = mprBtn;
     bar.appendChild(U.el('div', { class: 'vsep' }));
 
     TOOLS.forEach(([id, icon, label], i) => {
@@ -542,6 +544,7 @@
 
   /* ============ MPR 模式 ============ */
   let mprView = null;
+  let mprBtnRef = null;   // MPR 按钮(退出时同步取消高亮)
 
   function toggleMpr(btn) {
     if (mprView) { exitMpr(btn); return; }
@@ -583,9 +586,17 @@
     if (mprView) { mprView.destroy(); mprView = null; }
     U.$('#vpanes-wrap').classList.remove('mpr-on');
     U.$('#vpanes').style.display = '';
-    if (btn) { btn.classList.remove('active'); btn._on = false; }
-    // 恢复普通视图状态
-    if (app.viewer) app.viewer._notify();
+    const b = btn || mprBtnRef;
+    if (b) { b.classList.remove('active'); b._on = false; }
+    // 滑条/状态栏交还给普通视图
+    if (app.viewer) {
+      const s = app.viewer.state();
+      if (s) {
+        const sl = U.$('#inst-slider');
+        sl.max = s.total; sl.value = s.idx;
+      }
+      app.viewer._notify();
+    }
   }
 
   /* ============ 登录 ============ */
