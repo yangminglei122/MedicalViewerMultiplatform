@@ -423,7 +423,9 @@
       crossBtn.classList.toggle('active', MV.mprCrosshair !== false);
       if (mprView) mprView.renderAll();
     };
+    crossBtn.style.display = 'none';   // 仅 MPR 模式下显示
     bar.appendChild(crossBtn);
+    crossBtnRef = crossBtn;
     bar.appendChild(U.el('div', { class: 'vsep' }));
 
     TOOLS.forEach(([id, icon, label], i) => {
@@ -569,7 +571,8 @@
 
   /* ============ MPR 模式 ============ */
   let mprView = null;
-  let mprBtnRef = null;   // MPR 按钮(退出时同步取消高亮)
+  let mprBtnRef = null;    // MPR 按钮(退出时同步取消高亮)
+  let crossBtnRef = null;  // 十字线开关(仅 MPR 模式显示)
 
   function toggleMpr(btn) {
     if (mprView) { exitMpr(btn); return; }
@@ -606,6 +609,7 @@
       });
     btn.classList.add('active');
     btn._on = true;
+    if (crossBtnRef) crossBtnRef.style.display = '';
   }
 
   function exitMpr(btn) {
@@ -614,6 +618,7 @@
     U.$('#vpanes').style.display = '';
     const b = btn || mprBtnRef;
     if (b) { b.classList.remove('active'); b._on = false; }
+    if (crossBtnRef) crossBtnRef.style.display = 'none';
     // 滑条/状态栏交还给普通视图
     if (app.viewer) {
       const s = app.viewer.state();
