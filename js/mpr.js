@@ -213,6 +213,7 @@
         }
       }, { passive: false });
       el.addEventListener('dblclick', () => { this.zoom = 1; this.pan = { x: 0, y: 0 }; this.render(); });
+      el.addEventListener('pointerleave', () => { if (this._hover) { this._hover = false; this.render(); } });
       el.addEventListener('contextmenu', (e) => e.preventDefault());
       this.pointers = new Map();
     }
@@ -242,6 +243,19 @@
       return { dist: Math.hypot(ps[0].x - ps[1].x, ps[0].y - ps[1].y), zoom: this.zoom, cx: (ps[0].x + ps[1].x) / 2, cy: (ps[0].y + ps[1].y) / 2, pan: { ...this.pan } };
     }
     _move(e) {
+      // 悬停读数: 标签尾部显示 坐标 + 值
+      if (this.pointers.size === 0 && this.view.vol && this._map && e.pointerType === 'mouse') {
+        const pt = this.toPlanePixel(e.clientX, e.clientY);
+        const d = this.dims();
+        if (pt && pt.x >= 0 && pt.y >= 0 && pt.x < d.w && pt.y < d.h) {
+          const v = this.sample(Math.round(pt.x), Math.round(pt.y));
+          this.label.innerHTML = PLANE_LABEL[this.plane] +
+            '<span class="mpr-sub"> · ' + (this.idx() + 1) + '/' + this.axisMax() + ' · WC ' + Math.round(this.view.wc) + '/WW ' + Math.round(this.view.ww) +
+            ' · (' + Math.round(pt.x) + ',' + Math.round(pt.y) + ') ' + Math.round(v) + '</span>';
+          this._hover = true;
+          return;
+        }
+      }
       if (this.pointers.has(e.pointerId)) this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (this.pointers.size >= 2 && this._gesture) {
         const ps = Array.from(this.pointers.values());

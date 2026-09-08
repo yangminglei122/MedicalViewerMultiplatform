@@ -318,7 +318,7 @@
   const TOOLS = [
     ['wl', 'contrast', '调窗'], ['pan', 'pan', '平移'], ['zoom', 'zoom', '缩放'], ['scroll', 'scroll', '滚动'],
     ['length', 'ruler', '长度'], ['angle', 'angle', '角度'], ['rect', 'rect', '矩形'], ['ellipse', 'ellipse', '椭圆'],
-    ['probe', 'probe', '像素'], ['arrow', 'arrow', '箭头'], ['text', 'text', '文字']
+    ['text', 'text', '文字']
   ];
   // 窗宽窗位预设(按设备类型区分; null=文件默认, 'auto'=动态范围, 'wide'/'narrow'=窗宽倍增)
   const PRESET_SETS = {
@@ -351,42 +351,7 @@
     bar.appendChild(drawer);
     bar.appendChild(U.el('div', { class: 'vsep' }));
 
-    TOOLS.forEach(([id, icon, label], i) => {
-      const b = U.el('button', { class: 'tool-btn' + (i === 0 ? ' active' : ''), title: label, html: U.icon(icon) + '<span class="lbl">' + label + '</span>' });
-      b.onclick = () => {
-        app.viewer.setTool(id);
-        roiBtn.classList.remove('active');
-        U.$$('.tool-btn', bar).forEach((x) => x.classList.remove('active'));
-        b.classList.add('active');
-      };
-      bar.appendChild(b);
-      if (i === 3) bar.appendChild(U.el('div', { class: 'vsep' }));
-    });
-    bar.appendChild(U.el('div', { class: 'vsep' }));
-    const mkBtn = (icon, label, fn) => {
-      const b = U.el('button', { class: 'tool-btn', title: label, html: U.icon(icon) + '<span class="lbl">' + label + '</span>' });
-      b.onclick = fn; bar.appendChild(b); return b;
-    };
-    mkBtn('invert', '反色', () => {
-      if (mprView) { mprView.invertToggle(); return; }
-      app.viewer.invert();
-    });
-    mkBtn('rotateL', '左旋', () => app.viewer.rotate(-1));
-    mkBtn('rotateR', '右旋', () => app.viewer.rotate(1));
-    mkBtn('flipH', '水平翻转', () => app.viewer.flipH());
-    mkBtn('flipV', '垂直翻转', () => app.viewer.flipV());
-    mkBtn('reset', '复位', () => {
-      if (mprView) {
-        mprView.planes.forEach((p) => { p.zoom = 1; p.pan = { x: 0, y: 0 }; });
-        mprView.cross = { x: Math.floor(mprView.vol.nx / 2), y: Math.floor(mprView.vol.ny / 2), z: Math.floor(mprView.vol.nz / 2) };
-        mprView.wc = mprView.vol.wc; mprView.ww = mprView.vol.ww; mprView.invert = false;
-        mprView.renderAll();
-        U.$('#inst-slider').value = mprView.cross.z + 1;
-        return;
-      }
-      app.viewer.reset();
-    });
-    bar.appendChild(U.el('div', { class: 'vsep' }));
+    // —— 窗位预设 / ROI窗 / MPR(核心模式类控件放最前, 手机不用横向滚动也能看到)——
     presetSel = U.el('select', { class: 'input wl-preset-select', title: '窗宽窗位预设(按设备类型)', style: { width: '108px', padding: '6px' } });
     presetSel.addEventListener('change', () => {
       const opt = presetSel.selectedOptions[0];
@@ -425,6 +390,50 @@
       }
     };
     bar.appendChild(roiBtn);
+    // MPR: 三平面重建(需 ≥8 层的同尺寸序列)
+    const mprBtn = U.el('button', {
+      class: 'tool-btn warn', title: 'MPR 多平面重建: 轴位/冠状/矢状三视图 + 十字线联动(需 8 层以上序列)',
+      html: U.icon('layers') + '<span class="lbl">MPR</span>'
+    });
+    mprBtn.onclick = () => toggleMpr(mprBtn);
+    bar.appendChild(mprBtn);
+    bar.appendChild(U.el('div', { class: 'vsep' }));
+
+    TOOLS.forEach(([id, icon, label], i) => {
+      const b = U.el('button', { class: 'tool-btn' + (i === 0 ? ' active' : ''), title: label, html: U.icon(icon) + '<span class="lbl">' + label + '</span>' });
+      b.onclick = () => {
+        app.viewer.setTool(id);
+        roiBtn.classList.remove('active');
+        U.$$('.tool-btn', bar).forEach((x) => x.classList.remove('active'));
+        b.classList.add('active');
+      };
+      bar.appendChild(b);
+      if (i === 3) bar.appendChild(U.el('div', { class: 'vsep' }));
+    });
+    bar.appendChild(U.el('div', { class: 'vsep' }));
+    const mkBtn = (icon, label, fn) => {
+      const b = U.el('button', { class: 'tool-btn', title: label, html: U.icon(icon) + '<span class="lbl">' + label + '</span>' });
+      b.onclick = fn; bar.appendChild(b); return b;
+    };
+    mkBtn('invert', '反色', () => {
+      if (mprView) { mprView.invertToggle(); return; }
+      app.viewer.invert();
+    });
+    mkBtn('rotateL', '左旋', () => app.viewer.rotate(-1));
+    mkBtn('rotateR', '右旋', () => app.viewer.rotate(1));
+    mkBtn('flipH', '水平翻转', () => app.viewer.flipH());
+    mkBtn('flipV', '垂直翻转', () => app.viewer.flipV());
+    mkBtn('reset', '复位', () => {
+      if (mprView) {
+        mprView.planes.forEach((p) => { p.zoom = 1; p.pan = { x: 0, y: 0 }; });
+        mprView.cross = { x: Math.floor(mprView.vol.nx / 2), y: Math.floor(mprView.vol.ny / 2), z: Math.floor(mprView.vol.nz / 2) };
+        mprView.wc = mprView.vol.wc; mprView.ww = mprView.vol.ww; mprView.invert = false;
+        mprView.renderAll();
+        U.$('#inst-slider').value = mprView.cross.z + 1;
+        return;
+      }
+      app.viewer.reset();
+    });
     bar.appendChild(U.el('div', { class: 'vsep' }));
     [['layout1', '单图', 1], ['layout2', '双图', 2], ['layout4', '四图', 4]].forEach(([icon, label, n]) => {
       const b = U.el('button', { class: 'tool-btn', title: label, html: U.icon(icon) + '<span class="lbl">' + label + '</span>' });
@@ -433,13 +442,6 @@
     });
     bar.appendChild(U.el('div', { class: 'vsep' }));
     mkBtn('image', '导出PNG', () => app.viewer.exportPNG());
-    // MPR: 三平面重建(需 ≥8 层的同尺寸序列)
-    const mprBtn = U.el('button', {
-      class: 'tool-btn', title: 'MPR 多平面重建: 轴位/冠状/矢状三视图 + 十字线联动(需 8 层以上序列)',
-      html: U.icon('layers') + '<span class="lbl">MPR</span>'
-    });
-    mprBtn.onclick = () => toggleMpr(mprBtn);
-    bar.appendChild(mprBtn);
     if (MV.api.serverMode && app.studyData && app.studyData.study) {
       const uid = app.studyData.study.uid;
       if (uid) mkBtn('download', '导出DICOM', () => { location.href = MV.api.exportStudyUrl(uid); });

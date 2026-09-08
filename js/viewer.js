@@ -76,6 +76,7 @@
 
       this.canvas = U.el('canvas', { class: 'vp-canvas' });
       this.roiRect = null;          // ROI 自动窗的临时预览框(图像坐标)
+      this.probeInfo = null;        // 悬停读数 {x, y, v}(图像坐标 + 有效值)
       this.corners = {};
       ['tl', 'tr', 'bl', 'br'].forEach((k) => {
         this.corners[k] = U.el('div', { class: 'corner corner-' + k });
@@ -367,9 +368,15 @@
           (p && p.spacingX ? ' · ' + p.spacingX.toFixed(2) + '×' + p.spacingY.toFixed(2) + 'mm' : '');
       }
       const zoomStr = (this.scale / (this.frame ? Math.min(this.el.clientWidth / this.frame.cols, this.el.clientHeight / this.frame.rows) : 1)).toFixed(2);
+      let probeStr = '';
+      if (this.probeInfo && this.frame) {
+        const instH = this.stack.instCache.get(this.image.file.sop);
+        const unit = instH && instH.ds.p && instH.ds.p.intercept ? ' HU' : '';
+        probeStr = '<br>(' + this.probeInfo.x + ', ' + this.probeInfo.y + ') ' + Math.round(this.probeInfo.v) + unit;
+      }
       c.bl.innerHTML =
         'WC ' + Math.round(this.wl) + ' / WW ' + Math.round(this.ww) + '<br>' +
-        '放大 ' + zoomStr + 'x' + (this.invert ? ' · 反色' : '');
+        '放大 ' + zoomStr + 'x' + (this.invert ? ' · 反色' : '') + probeStr;
     }
 
     /* ---------- 标注 ---------- */
@@ -535,6 +542,7 @@
         if (Date.now() - this.lastCompleted < 400) return;
         this.reset();
       });
+      el.addEventListener('pointerleave', () => { this.probeInfo = null; this._updateCorners(); });
       el.addEventListener('pointerleave', () => { if (this.pendingAnno && this.pendingAnno._preview) { /* 保留 */ } });
     }
 
@@ -624,6 +632,15 @@
     }
 
     _move(e) {
+      // 悬停读数(无按键时): 左下角显示 坐标 + 灰度/HU
+      if (this.pointers.size === 0 && this.frame && e.pointerType === 'mouse') {
+        const pos = this._local(e);
+        const t = this._transform();
+        const ip = this.screenToImage(t, pos.x, pos.y);
+        const v = this._effAt(ip.x, ip.y);
+        this.probeInfo = isFinite(v) ? { x: Math.round(ip.x), y: Math.round(ip.y), v } : null;
+        this._updateCorners();
+      }
       if (this.pointers.has(e.pointerId)) this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
       if (this.pointers.size >= 2 && this.gesture) {
