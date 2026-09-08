@@ -111,7 +111,7 @@
     ds.tag(0x0020, 0x0010).vr('SH').str('1');
     ds.tag(0x0020, 0x0011).vr('IS').str(String(cfg.seriesNo));
     ds.tag(0x0020, 0x0013).vr('IS').str(String(cfg.instNo));
-    ds.tag(0x0020, 0x0032).vr('DS').str('-127.5\\-127.5\\' + (cfg.instNo * cfg.spacing).toFixed(1));
+    ds.tag(0x0020, 0x0032).vr('DS').str('-127.5\\-127.5\\' + (cfg.posZ != null ? cfg.posZ : (cfg.instNo * cfg.spacing).toFixed(1)));
     ds.tag(0x0020, 0x0037).vr('DS').str('1\\0\\0\\0\\1\\0');
     // 图像组(0028)
     ds.tag(0x0028, 0x0002).vr('US').us(1);
@@ -244,12 +244,40 @@
     return px;
   }
 
-  /** 生成全部演示文件; opts: {ct, mr, size} 可调数量与尺寸(压测用) */
+  /** 生成全部演示文件; opts: {ct, mr, size, dwi} — dwi 生成同序列双层交织(验证子序列拆分) */
   async function generate(opts) {
     opts = opts || {};
     const files = [];
     const N_CT = opts.ct != null ? opts.ct : 32, N_MR = opts.mr != null ? opts.mr : 24;
     const CT_SIZE = opts.size || 512;
+
+    if (opts.dwi) {
+      // 交织 DWI: 一个序列 UID, 8 个层位 × 2 组交替(同 pos, 同 acq/echo, instNo 全 0)
+      const study = UID_ROOT + '.300.1', series = UID_ROOT + '.300.2';
+      const NL = 8;
+      for (let layer = 1; layer <= NL; layer++) {
+        for (let grp = 1; grp <= 2; grp++) {
+          const px = mrBrainSlice(128, 128, layer + grp * 0.001, NL); // 轻微差异
+          files.push({
+            name: 'DWI_' + String(layer).padStart(2, '0') + '_' + grp + '.dcm',
+            bytes: makeInstance({
+              charset: 'ISO_IR 192', name: 'DWI测试', patientId: 'DWITEST',
+              birth: '19900101', sex: 'F',
+              studyUid: study, seriesUid: series, sopUid: series + '.' + ((layer - 1) * 2 + grp),
+              sopClass: '1.2.840.10008.5.1.4.1.1.4',
+              modality: 'MR', studyDesc: 'DWI 交织测试', seriesDesc: 'DWI',
+              studyDate: '20260909', accession: '',
+              seriesNo: 1, instNo: 0, rows: 128, cols: 128,
+              thickness: 5, spacing: 5, pixelSpacing: [1.5, 1.5],
+              wc: 500, ww: 1600, intercept: 0, signed: false, bitsStored: 16,
+              pixels: px,
+              posZ: (layer * 5).toFixed(1)
+            })
+          });
+        }
+      }
+      return files;
+    }
 
     // 研究1: CT 胸部(GB18030 中文患者,两个序列: 轴位 + 冠状位重建)
     const ctStudy = UID_ROOT + '.100.1';

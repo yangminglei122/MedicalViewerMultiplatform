@@ -105,6 +105,7 @@
       studyUid, seriesUid,
       sop: ds.str(TAG.SOPInstanceUID) || ('nosop-' + Math.random().toString(36).slice(2)),
       instNo: parseInt(ds.str(TAG.InstanceNumber)) || 0,
+      position: (ds.p && ds.p.position && ds.p.position.length >= 3) ? ds.p.position : null,
       frames: Math.max(1, parseInt(ds.str(TAG.NumberOfFrames)) || 1),
       studyDesc: ds.str(TAG.StudyDescription) || '未命名检查',
       studyDate: ds.str(TAG.StudyDate).replace(/\D/g, ''),
@@ -116,6 +117,39 @@
   }
 
   /* ---------- 分组 ---------- */
+  /** 同一序列 UID 内按层位交织存放的多组图像(DWI 多 b 值等): 按层位出现序拆成子序列 */
+  function splitInterleavedSeries(groups) {
+    groups.forEach((g) => {
+      g.studies.forEach((st) => {
+        const newMap = new Map();
+        st.series.forEach((se, seUid) => {
+          // 按原始文件序排,统计每个层位出现次数
+          const items = se.items.slice().sort((a, b) => (a._ord || 0) - (b._ord || 0));
+          const seen = new Map();
+          let maxOcc = 1;
+          items.forEach((it) => {
+            const c = (seen.get(it.posKey) || 0) + 1;
+            seen.set(it.posKey, c);
+            it._occ = c;
+            if (c > maxOcc) maxOcc = c;
+          });
+          if (maxOcc < 2) { newMap.set(seUid, se); return; }
+          // 拆成 maxOcc 个子序列
+          for (let o = 1; o <= maxOcc; o++) {
+            const sub = items.filter((it) => it._occ === o);
+            if (!sub.length) continue;
+            newMap.set(seUid + '.s' + o, Object.assign({}, se, {
+              uid: seUid + '.s' + o,
+              desc: se.desc + ' [' + o + '/' + maxOcc + ']',
+              items: sub
+            }));
+          }
+        });
+        st.series = newMap;
+      });
+    });
+  }
+
   function newGroup(meta) {
     return {
       patient: { id: meta.id, name: meta.name, birth: meta.birth, sex: meta.sex },
@@ -160,8 +194,12 @@
     const localFiles = [];          // 本地 DICOM 文件
     const stagedFiles = [];         // ZIP 解出的服务器端暂存文件 {batch,id,name}
 
-    const addMeta = (meta, item) => {
+    const addMeta = (meta, item, ord) => {
       if (!meta.hasPixels) { nonImageCount++; return; }   // SR/PR 等非图像对象不入库
+      item._ord = (ord != null) ? ord : okCount;
+      item.posKey = (meta.position && meta.position.length >= 3)
+        ? meta.position.map((v) => Math.round(v * 100) / 100).join(',')
+        : ('no:' + meta.instNo);
       const key = meta.id !== '' ? 'id:' + meta.id : 'nm:' + meta.name + '|' + meta.birth;
       let g = groups.get(key);
       if (!g) { g = newGroup(meta); groups.set(key, g); }
@@ -201,21 +239,22 @@
         parsed++;
         if (totalParse) prog.update(parsed / totalParse, '解析中 ' + parsed + '/' + totalParse + (zipCount ? '(含 ' + zipCount + ' 个压缩包)' : ''));
       };
-      await U.runPool(localFiles, 8, async (f) => {
+      await U.runPool(localFiles, 8, async (f, idx) => {
         const ds = await readFileHeader(f);
         const meta = ds ? extractMeta(ds) : null;
-        if (meta) addMeta(meta, { blob: f, name: f.name, sop: meta.sop, no: meta.instNo, frames: meta.frames });
+        if (meta) addMeta(meta, { blob: f, name: f.name, sop: meta.sop, no: meta.instNo, frames: meta.frames }, idx);
         else skipCount++;
         tick();
       });
       // 阶段3: 暂存文件并发读取头部并解析
-      await U.runPool(stagedFiles, 6, async (sf) => {
+      await U.runPool(stagedFiles, 6, async (sf, idx) => {
         const ds = await readStagedHeader(api, sf.batch, sf.id);
         const meta = ds ? extractMeta(ds) : null;
-        if (meta) addMeta(meta, { stagedId: sf.id, stagedBatch: sf.batch, name: sf.name, sop: meta.sop, no: meta.instNo, frames: meta.frames });
+        if (meta) addMeta(meta, { stagedId: sf.id, stagedBatch: sf.batch, name: sf.name, sop: meta.sop, no: meta.instNo, frames: meta.frames }, localFiles.length + idx);
         else skipCount++;
         tick();
       });
+      splitInterleavedSeries(groups);
     } finally {
       prog.close();
     }
@@ -244,7 +283,7 @@
     const groupList = Array.from(groups.values());
     let imported = 0, previews = 0;
     for (let gi = 0; gi < groupList.length; gi++) {
-      const r = await confirmDialog(groupList[gi], gi + 1, groupList.length, existing, existingStudyUids, server);
+      const r = await confirmDialog(groupList[gi], gi + 1, groupList.length, existing, existingStudyUids, studyOwner, server);
       if (r.action === 'cancel') break;
       if (r.action === 'preview') {
         previews++;
@@ -262,7 +301,7 @@
   }
 
   /* ---------- 确认对话框 ---------- */
-  function confirmDialog(group, gi, gn, existing, existingStudyUids, server) {
+  function confirmDialog(group, gi, gn, existing, existingStudyUids, studyOwner, server) {
     return new Promise((resolve) => {
       const p = group.patient;
       const totalInstances = Array.from(group.studies.values()).reduce(
@@ -398,7 +437,7 @@
           U.el('div', { class: 'muted', style: { fontSize: '12.5px' }, text: seriesCount + ' 个序列 · ' + instCount + ' 幅图像' }),
           exists ? U.el('label', { style: { display: 'flex', gap: '6px', alignItems: 'center', marginTop: '6px', fontSize: '13px', color: 'var(--muted)' } }, [
             skip, U.el('span', {
-              html: studyOwner.has(st.uid)
+              html: (studyOwner && studyOwner.has(st.uid))
                 ? '⚠ 该检查现登记在「<b>' + U.esc(studyOwner.get(st.uid)) + '</b>」名下;确认导入将把整个检查<b>转移</b>到当前患者(可先修改上方姓名)。勾选则不动它'
                 : '该检查已存在,默认合并(重复图像自动去重);勾选则本次跳过'
             })
