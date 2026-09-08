@@ -11,11 +11,12 @@
   const PLANE_LABEL = { axial: '轴位 AX', coronal: '冠状 COR', sagittal: '矢状 SAG' };
   const LINE_COLOR = { x: '#ff6b81', y: '#61d9ff', z: '#ffd83d' };   // 十字线: x红/y蓝/z黄
 
-  /** 从 Stack 异步构建体数据 */
+  /** 从 Stack 异步构建体数据
+   * 层位沿图像法线(IOP 行向量×列向量)投影并排序 — 兼容轴位/冠状/矢状位采集;
+   * 层间距回退链: 法线方向投影差中位数 → SpacingBetweenSlices → SliceThickness → 1 */
   async function buildVolume(stack, onProgress) {
     const imgs = stack.images;
     if (!imgs.length) throw new Error('空序列');
-    // 顺序: 按 InstanceNumber 已排序; 读取首帧取尺寸
     const first = await stack.instance(imgs[0].file);
     const fr = await first.dec.getFrame(imgs[0].frame);
     if (fr.kind === 'rgb') throw new Error('MPR 暂不支持彩色序列');
@@ -24,38 +25,70 @@
     const sx = p0.spacingX > 0 ? p0.spacingX : 1;
     const sy = p0.spacingY > 0 ? p0.spacingY : 1;
 
-    const vol = new Float32Array(nx * ny * imgs.length);
-    const zs = new Float32Array(imgs.length);
-    let wc = NaN, ww = NaN, slope = p0.slope || 1, inter = p0.intercept || 0, signed = !!p0.signed;
+    // 图像法线 = 行方向 × 列方向(缺省假设轴位 1,0,0 / 0,1,0 → 法线 0,0,1)
+    const iop0 = p0.orientation && p0.orientation.length >= 6 ? p0.orientation : [1, 0, 0, 0, 1, 0];
+    const nrm = [
+      iop0[1] * iop0[5] - iop0[2] * iop0[4],
+      iop0[2] * iop0[3] - iop0[0] * iop0[5],
+      iop0[0] * iop0[4] - iop0[1] * iop0[3]
+    ];
+
+    // 逐层: 读位置投影, 收集顺序
+    const order = [];
+    const zsInfo = [];
+    let wc = NaN, ww = NaN;
     if (isFinite(p0.wc) && isFinite(p0.ww) && p0.ww > 0) { wc = p0.wc; ww = p0.ww; }
 
     for (let k = 0; k < imgs.length; k++) {
       const inst = await stack.instance(imgs[k].file);
+      const dsP = inst.ds.p || {};
+      if (!isFinite(wc) && isFinite(dsP.wc) && isFinite(dsP.ww) && dsP.ww > 0) { wc = dsP.wc; ww = dsP.ww; }
+      const pos = dsP.position;
+      const zProj = pos && pos.length >= 3 ? (pos[0] * nrm[0] + pos[1] * nrm[1] + pos[2] * nrm[2]) : NaN;
+      zsInfo.push({ k, zProj, inst });
+    }
+
+    const hasProj = zsInfo.every((e) => isFinite(e.zProj));
+    let zs = new Float32Array(imgs.length);
+    if (hasProj) {
+      zsInfo.sort((a, b) => a.zProj - b.zProj);
+      for (let i = 0; i < zsInfo.length; i++) { zs[i] = zsInfo[i].zProj; order.push(zsInfo[i].k); }
+    } else {
+      for (let k = 0; k < imgs.length; k++) { zs[k] = k; order.push(k); }
+    }
+
+    // 层间距回退链
+    let sz = 0;
+    if (hasProj && imgs.length >= 2) {
+      const diffs = [];
+      for (let k = 1; k < imgs.length; k++) diffs.push(Math.abs(zs[k] - zs[k - 1]));
+      diffs.sort((a, b) => a - b);
+      const med = diffs[Math.floor(diffs.length / 2)];
+      if (med > 0.01) sz = med;   // 全同投影(单排定位像等)则跳过
+    }
+    if (!(sz > 0.01)) sz = Math.abs(p0.spacingBetween || 0);
+    if (!(sz > 0.01)) sz = Math.abs(p0.thickness || 0);
+    if (!(sz > 0.01)) sz = 1;
+
+    // 按层序构建体数据
+    const vol = new Float32Array(nx * ny * imgs.length);
+    for (let i = 0; i < order.length; i++) {
+      const k = order[i];
+      const inst = zsInfo.length ? zsInfo[hasProj ? i : k].inst : await stack.instance(imgs[k].file);
       const f = await inst.dec.getFrame(imgs[k].frame);
       if (f.cols !== nx || f.rows !== ny) throw new Error('序列内图像尺寸不一致, 无法重建');
       const dsP = inst.ds.p || {};
       const sl = dsP.slope || 1, it = dsP.intercept || 0, sg = !!dsP.signed;
       const src = f.pixels;
-      const base = k * nx * ny;
-      for (let i = 0; i < nx * ny; i++) {
-        let v = src[i];
+      const base = i * nx * ny;
+      for (let j = 0; j < nx * ny; j++) {
+        let v = src[j];
         if (sg && v > 32767) v -= 65536;
-        vol[base + i] = v * sl + it;
+        vol[base + j] = v * sl + it;
       }
-      const pos = dsP.position;
-      zs[k] = pos && pos.length >= 3 ? pos[2] : k;
-      if (!isFinite(wc) && isFinite(dsP.wc) && isFinite(dsP.ww) && dsP.ww > 0) { wc = dsP.wc; ww = dsP.ww; }
-      if (onProgress && (k % 8 === 0 || k === imgs.length - 1)) onProgress((k + 1) / imgs.length);
+      if (onProgress && (i % 8 === 0 || i === order.length - 1)) onProgress((i + 1) / order.length);
     }
-    // 层间距: 相邻 z 差的中位数
-    let sz = 1;
-    if (imgs.length >= 2) {
-      const diffs = [];
-      for (let k = 1; k < imgs.length; k++) diffs.push(Math.abs(zs[k] - zs[k - 1]));
-      diffs.sort((a, b) => a - b);
-      sz = diffs[Math.floor(diffs.length / 2)] || 1;
-    }
-    if (!(sz > 0)) sz = Math.abs(p0.spacingBetween || p0.thickness || 1) || 1;
+
     // 全局自动窗兜底
     if (!isFinite(wc) || !isFinite(ww) || ww <= 0) {
       let mn = Infinity, mx = -Infinity;

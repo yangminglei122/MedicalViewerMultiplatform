@@ -28,6 +28,7 @@
     PatientAge: T(0x0010, 0x1010),
     SliceThickness: T(0x0018, 0x0050),
     SpacingBetweenSlices: T(0x0018, 0x0088),
+    ImagerPixelSpacing: T(0x0018, 0x1164),
     KVP: T(0x0018, 0x0060),
     PatientPosition: T(0x0018, 0x5100),
     StudyInstanceUID: T(0x0020, 0x000d),
@@ -81,7 +82,7 @@
     d[TAG.StudyDescription] = 'LO'; d[TAG.SeriesDescription] = 'LO';
     d[TAG.PatientName] = 'PN'; d[TAG.PatientID] = 'LO'; d[TAG.BirthDate] = 'DA';
     d[TAG.PatientSex] = 'CS'; d[TAG.PatientAge] = 'AS';
-    d[TAG.SliceThickness] = 'DS'; d[TAG.SpacingBetweenSlices] = 'DS'; d[TAG.KVP] = 'DS';
+    d[TAG.SliceThickness] = 'DS'; d[TAG.SpacingBetweenSlices] = 'DS'; d[TAG.ImagerPixelSpacing] = 'DS'; d[TAG.KVP] = 'DS';
     d[TAG.PatientPosition] = 'CS';
     d[TAG.StudyInstanceUID] = 'UI'; d[TAG.SeriesInstanceUID] = 'UI'; d[TAG.StudyID] = 'SH';
     d[TAG.SeriesNumber] = 'IS'; d[TAG.InstanceNumber] = 'IS';
@@ -360,6 +361,11 @@
     };
     const sp = ds.nums(TAG.PixelSpacing);
     if (sp.length >= 2) { p.spacingY = sp[0]; p.spacingX = sp[1]; } // DICOM: [行间距, 列间距]
+    if (!(p.spacingX > 0) || !(p.spacingY > 0)) {
+      // 像素间距缺失时回退 ImagerPixelSpacing(DX 常用)
+      const ips = ds.nums(TAG.ImagerPixelSpacing);
+      if (ips.length >= 2) { if (!(p.spacingY > 0)) p.spacingY = ips[0]; if (!(p.spacingX > 0)) p.spacingX = ips[1]; }
+    }
     p.isColor = p.samples === 3;
     p.defaultInvert = p.photometric === 'MONOCHROME1' || p.presentationLUT === 'INVERSE';
     // 调色板(PALETTE COLOR)
