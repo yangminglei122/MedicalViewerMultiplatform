@@ -412,6 +412,18 @@
       if (mprView) mprView.renderAll();
     };
     bar.appendChild(smoothBtn);
+    // MPR 十字线显示开关(仅影响 MPR 模式)
+    const crossBtn = U.el('button', {
+      class: 'tool-btn warn' + (MV.mprCrosshair !== false ? ' active' : ''),
+      title: 'MPR 十字线: 显示/隐藏三平面参考线(隐藏后仍可点击/拖动定位)',
+      html: U.icon('search') + '<span class="lbl">十字线</span>'
+    });
+    crossBtn.onclick = () => {
+      MV.mprCrosshair = MV.mprCrosshair === false ? true : false;
+      crossBtn.classList.toggle('active', MV.mprCrosshair !== false);
+      if (mprView) mprView.renderAll();
+    };
+    bar.appendChild(crossBtn);
     bar.appendChild(U.el('div', { class: 'vsep' }));
 
     TOOLS.forEach(([id, icon, label], i) => {

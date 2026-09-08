@@ -10,6 +10,7 @@
 
   const PLANE_LABEL = { axial: '轴位 AX', coronal: '冠状 COR', sagittal: '矢状 SAG' };
   const LINE_COLOR = { x: '#ff6b81', y: '#61d9ff', z: '#ffd83d' };   // 十字线: x红/y蓝/z黄
+  MV.mprCrosshair = true;   // 十字线显示开关(工具栏按钮切换)
 
   /** 从 Stack 异步构建体数据
    * 层位沿图像法线(IOP 行向量×列向量)投影并排序 — 兼容轴位/冠状/矢状位采集;
@@ -198,27 +199,28 @@
       // drawImage 到物理比例目标区
       ctx.drawImage(tmp, ox, oy, d.w * d.px * scale, d.h * d.py * scale);
 
-      // 十字线: 方向由该轴在平面内的朝向决定(d.ax=平面水平轴→竖线, d.ay=垂直轴→横线)
-      // 矢状面 y 为水平轴, 不能按轴名硬编码方向
-      const cross = this.view.cross;
-      const lineV = (value, color) => {
-        const x = ox + value * d.px * scale;
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 1.2 * dpr;
-        ctx.setLineDash([6 * dpr, 5 * dpr]);
-        ctx.beginPath(); ctx.moveTo(x, oy); ctx.lineTo(x, oy + d.h * d.py * scale); ctx.stroke();
-        ctx.setLineDash([]);
-      };
-      const lineH = (value, color) => {
-        const y = oy + value * d.py * scale;
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 1.2 * dpr;
-        ctx.setLineDash([6 * dpr, 5 * dpr]);
-        ctx.beginPath(); ctx.moveTo(ox, y); ctx.lineTo(ox + d.w * d.px * scale, y); ctx.stroke();
-        ctx.setLineDash([]);
-      };
-      lineV(cross[d.ax], LINE_COLOR[d.ax]);
-      lineH(cross[d.ay], LINE_COLOR[d.ay]);
+      // 十字线(可隐藏): 方向由该轴在平面内的朝向决定(d.ax=平面水平轴→竖线, d.ay=垂直轴→横线)
+      if (MV.mprCrosshair !== false) {
+        const cross = this.view.cross;
+        const lineV = (value, color) => {
+          const x = ox + value * d.px * scale;
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1.2 * dpr;
+          ctx.setLineDash([6 * dpr, 5 * dpr]);
+          ctx.beginPath(); ctx.moveTo(x, oy); ctx.lineTo(x, oy + d.h * d.py * scale); ctx.stroke();
+          ctx.setLineDash([]);
+        };
+        const lineH = (value, color) => {
+          const y = oy + value * d.py * scale;
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1.2 * dpr;
+          ctx.setLineDash([6 * dpr, 5 * dpr]);
+          ctx.beginPath(); ctx.moveTo(ox, y); ctx.lineTo(ox + d.w * d.px * scale, y); ctx.stroke();
+          ctx.setLineDash([]);
+        };
+        lineV(cross[d.ax], LINE_COLOR[d.ax]);
+        lineH(cross[d.ay], LINE_COLOR[d.ay]);
+      }
 
       // 标签
       this.label.innerHTML = PLANE_LABEL[this.plane] +
