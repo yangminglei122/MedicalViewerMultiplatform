@@ -15,13 +15,27 @@
   /* 原生控件(日期选择器/下拉/滚动条)用深色渲染, 否则日历图标在深色背景下不可见 */
   color-scheme: dark;
 }
-/* 日期输入框: 图标与文字保持可读(兜底不支持 color-scheme 的内核) */
+/* 日期输入框: 图标与文字保持可读 */
+input[type="date"] {
+  background: var(--panel2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  min-height: 38px;
+}
+input[type="date"]:hover { border-color: #4a5a74; }
 input[type="date"]::-webkit-calendar-picker-indicator {
-  filter: invert(0.85);
+  filter: invert(1) brightness(1.55);
+  opacity: 1;
+  width: 17px;
+  height: 17px;
   cursor: pointer;
 }
-input[type="date"]::-webkit-datetime-edit { color: var(--text); }
-input[type="date"] { min-height: 38px; }
+input[type="date"]:hover::-webkit-calendar-picker-indicator { filter: invert(1) brightness(2); }
+input[type="date"]::-webkit-datetime-edit,
+input[type="date"]::-webkit-datetime-edit-text,
+input[type="date"]::-webkit-datetime-edit-year-field,
+input[type="date"]::-webkit-datetime-edit-month-field,
+input[type="date"]::-webkit-datetime-edit-day-field { color: #d7e0ec; }
 * { box-sizing: border-box; }
 html, body { height: 100%; }
 body {
