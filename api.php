@@ -11,7 +11,9 @@
  */
 
 error_reporting(E_ALL & ~E_DEPRECATED & ~E_NOTICE);
-define('MV_VERSION', '1.0.0');
+// JSON API 严禁任何警告/通知直接输出污染响应体(错误仍写服务器日志)
+@ini_set('display_errors', '0');
+define('MV_VERSION', '1.4.1');
 
 $__dir = __DIR__;
 if (is_file($__dir . '/config.php')) require_once $__dir . '/config.php';
@@ -689,7 +691,8 @@ try {
                 if ($studyUid === '') continue;
                 $stSafe = mv_safe_uid($studyUid);
 
-                // 跨患者同检查 UID: 该检查归属以本次确认的患者为准, 旧患者名下整体转移(移目录+删条目)
+                // 跨患者同检查 UID: 归属以本次确认的患者为准。
+                // 旧患者名下的条目整体搬入新患者(条目+文件目录), 后续按已存在合并处理
                 foreach ($idx['patients'] as $opi => $op) {
                     if (($op['dir'] ?? '') === $pat['dir']) continue;
                     foreach ($op['studies'] as $osi => $ost) {
@@ -704,6 +707,35 @@ try {
                             }
                         }
                         $transferredFrom = $op['name'];
+                        // 条目并入新患者(新患者尚无此检查时直接搬入; 已有则按序列合并)
+                        $hasHere = false;
+                        foreach ($pat['studies'] as &$hex) { if ($hex['uid'] === $studyUid) { $hasHere = true; break; } }
+                        unset($hex);
+                        if (!$hasHere) {
+                            $pat['studies'][] = $ost;
+                        } else {
+                            foreach ($ost['series'] as $ose) {
+                                $hit = false;
+                                foreach ($pat['studies'] as &$hex2) {
+                                    if ($hex2['uid'] !== $studyUid) continue;
+                                    foreach ($hex2['series'] as &$hse) {
+                                        if ($hse['uid'] === $ose['uid']) {
+                                            $sops = array();
+                                            foreach ($hse['files'] as $hf) $sops[$hf['sop']] = 1;
+                                            foreach ($ose['files'] as $of) if (!isset($sops[$of['sop']])) $hse['files'][] = $of;
+                                            $hit = true; break;
+                                        }
+                                    }
+                                    unset($hse);
+                                    if ($hit) break;
+                                }
+                                unset($hex2);
+                                if (!$hit) {
+                                    foreach ($pat['studies'] as &$hex3) { if ($hex3['uid'] === $studyUid) { $hex3['series'][] = $ose; break; } }
+                                    unset($hex3);
+                                }
+                            }
+                        }
                         array_splice($idx['patients'][$opi]['studies'], $osi, 1);
                         if (!count($idx['patients'][$opi]['studies'])) {
                             @rmdir(MV_FILES_DIR . '/' . $op['dir']);

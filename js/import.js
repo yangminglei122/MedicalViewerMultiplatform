@@ -228,12 +228,15 @@
     if (nonImageCount) U.toast('已跳过 ' + nonImageCount + ' 个非图像对象(结构化报告/注释等,不含影像)', 'info', 4000);
 
     // 获取已有患者(用于合并提示)
-    let existing = null, existingStudyUids = new Set();
+    let existing = null, existingStudyUids = new Set(), studyOwner = new Map();
     if (server) {
       try {
         const r = await api.get('list');
         existing = r.patients || [];
-        existing.forEach((p) => (p.studies || []).forEach((st) => existingStudyUids.add(st.uid)));
+        existing.forEach((p) => (p.studies || []).forEach((st) => {
+          existingStudyUids.add(st.uid);
+          studyOwner.set(st.uid, p.name);
+        }));
       } catch (e) { /* 忽略 */ }
     }
 
@@ -394,7 +397,11 @@
           ]),
           U.el('div', { class: 'muted', style: { fontSize: '12.5px' }, text: seriesCount + ' 个序列 · ' + instCount + ' 幅图像' }),
           exists ? U.el('label', { style: { display: 'flex', gap: '6px', alignItems: 'center', marginTop: '6px', fontSize: '13px', color: 'var(--muted)' } }, [
-            skip, U.el('span', { text: '该检查已存在,默认合并(重复图像自动去重);勾选则本次跳过' })
+            skip, U.el('span', {
+              html: studyOwner.has(st.uid)
+                ? '⚠ 该检查现登记在「<b>' + U.esc(studyOwner.get(st.uid)) + '</b>」名下;确认导入将把整个检查<b>转移</b>到当前患者(可先修改上方姓名)。勾选则不动它'
+                : '该检查已存在,默认合并(重复图像自动去重);勾选则本次跳过'
+            })
           ]) : null
         ]);
         st._descInput = descInput;
