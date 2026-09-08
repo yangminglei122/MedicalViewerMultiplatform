@@ -164,20 +164,27 @@
       // drawImage 到物理比例目标区
       ctx.drawImage(tmp, ox, oy, d.w * d.px * scale, d.h * d.py * scale);
 
-      // 十字线(其余两轴)
+      // 十字线: 方向由该轴在平面内的朝向决定(d.ax=平面水平轴→竖线, d.ay=垂直轴→横线)
+      // 矢状面 y 为水平轴, 不能按轴名硬编码方向
       const cross = this.view.cross;
-      const line = (axis, value, color) => {
-        let x1, y1, x2, y2;
-        if (axis === 'x') { x1 = x2 = ox + value * d.px * scale; y1 = oy; y2 = oy + d.h * d.py * scale; }
-        else { y1 = y2 = oy + value * d.py * scale; x1 = ox; x2 = ox + d.w * d.px * scale; }
+      const lineV = (value, color) => {
+        const x = ox + value * d.px * scale;
         ctx.strokeStyle = color;
         ctx.lineWidth = 1.2 * dpr;
         ctx.setLineDash([6 * dpr, 5 * dpr]);
-        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x, oy); ctx.lineTo(x, oy + d.h * d.py * scale); ctx.stroke();
         ctx.setLineDash([]);
       };
-      line(d.ax, cross[d.ax], LINE_COLOR[d.ax]);
-      line(d.ay, cross[d.ay], LINE_COLOR[d.ay]);
+      const lineH = (value, color) => {
+        const y = oy + value * d.py * scale;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.2 * dpr;
+        ctx.setLineDash([6 * dpr, 5 * dpr]);
+        ctx.beginPath(); ctx.moveTo(ox, y); ctx.lineTo(ox + d.w * d.px * scale, y); ctx.stroke();
+        ctx.setLineDash([]);
+      };
+      lineV(cross[d.ax], LINE_COLOR[d.ax]);
+      lineH(cross[d.ay], LINE_COLOR[d.ay]);
 
       // 标签
       this.label.innerHTML = PLANE_LABEL[this.plane] +

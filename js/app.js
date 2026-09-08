@@ -569,6 +569,7 @@
         sl.min = 1; sl.max = m.vol.nz; sl.value = m.cross.z + 1;
       }
     });
+    window.__mpr = mprView;   // 调试/测试引用
     const mask = U.el('div', { class: 'vp-load', style: { display: '' } , text: '正在重建体数据(' + st.images.length + ' 层)…' });
     wrap.appendChild(mask);
     mprView.build((p) => { mask.textContent = '正在重建体数据 ' + Math.round(p * 100) + '%(' + st.images.length + ' 层)…'; })
