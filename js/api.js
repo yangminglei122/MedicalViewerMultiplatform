@@ -137,6 +137,7 @@
         fd.append('name', name || 'upload');
         fd.append('index', i);
         fd.append('total', total);
+        fd.append('cs', chunk.size);
         fd.append('chunk', chunk, 'chunk.bin');
         U.xhrProgress(this.url('chunk'), { method: 'POST', body: fd, headers: { 'X-MV': '1' } },
           onChunkProgress || (() => { }))
@@ -155,7 +156,7 @@
     async uploadChunked(batch, blob, name, kind, onProgress) {
       const CHUNK = 8 * 1024 * 1024;
       const total = Math.max(1, Math.ceil(blob.size / CHUNK));
-      const maxTry = 3;
+      const maxTry = 5;
       let curBatch = batch;
       let result = null;
       let attempt = 0;   // 当前块的重试次数
@@ -167,19 +168,24 @@
         try {
           result = await this._sendChunk(curBatch, chunk, name, kind, i, total,
             onProgress ? (p) => onProgress((i + p) / total) : null);
+          if (i === total - 1 && !(result && Array.isArray(result.files))) {
+            // 末块未返回文件清单(重试命中幂等分支/组装失败) → 换批重传整文件
+            throw new Error('末块未完成组装');
+          }
           i++;
           attempt = 0;
           if (onProgress) onProgress(i / total);
         } catch (e) {
           const msg = e && e.message || '';
-          attempt++;
-          if (/批次不存在/.test(msg) || /乱序/.test(msg)) {
-            // 服务器端批次被清理/进度错位 → 换新批次从头重传
+          const needRestart = /批次不存在|乱序|不完整|末块未完成组装|不是有效的 ZIP|ZIP 中未找到/.test(msg) ||
+            (i === total - 1 && attempt >= 1);   // 末块失败重试一次仍败 → 整文件重传
+          if (needRestart) {
             if (++restarts > maxRestarts) throw e;
             try { curBatch = (await this.tmpbegin()).batch; } catch (e2) { throw e; }
             i = 0; attempt = 0;
             continue;
           }
+          attempt++;
           if (attempt >= maxTry) throw e;
           await new Promise((r) => setTimeout(r, 800 * attempt));
         }

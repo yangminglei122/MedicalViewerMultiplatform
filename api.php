@@ -542,6 +542,9 @@ try {
                 mv_json(array('ok' => true, 'received' => $recv, 'size' => $meta['size'], 'dup' => true));
             }
             if ($index !== $recv) mv_fail('数据块乱序(期望 ' . $recv . ',收到 ' . $index . ')');
+            // 块完整性: 客户端声明每块字节数, 不符说明传输被截断(不推进进度, 客户端会重试)
+            $cs = isset($_POST['cs']) ? (int)$_POST['cs'] : 0;
+            if ($cs > 0 && $uf['size'] != $cs) mv_fail('数据块不完整(收到 ' . $uf['size'] . ' 字节, 应为 ' . $cs . ')');
             $part = $dir . '/.upload.part';
             $fo = @fopen($part, 'ab');
             if (!$fo) mv_fail('写入分块失败(检查目录权限)', 500);

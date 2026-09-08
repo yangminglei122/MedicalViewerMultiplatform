@@ -345,7 +345,7 @@
     const bar = U.$('#vtoolbar');
     bar.innerHTML = '';
     // 返回 + 序列抽屉
-    const back = U.el('button', { class: 'tool-btn', title: '返回列表', html: U.icon('back') + '<span class="lbl">返回</span>', onclick: () => { location.hash = '#/'; } });
+    const back = U.el('button', { class: 'tool-btn', title: '返回列表', html: U.icon('back') + '<span class="lbl">返回</span>', onclick: () => { exitMpr(); location.hash = '#/'; } });
     bar.appendChild(back);
     const drawer = U.el('button', { class: 'tool-btn series-drawer-btn', title: '序列列表', html: U.icon('menu') + '<span class="lbl">序列</span>', onclick: () => U.$('#vseries').classList.toggle('open') });
     bar.appendChild(drawer);
@@ -367,17 +367,46 @@
       const b = U.el('button', { class: 'tool-btn', title: label, html: U.icon(icon) + '<span class="lbl">' + label + '</span>' });
       b.onclick = fn; bar.appendChild(b); return b;
     };
-    mkBtn('invert', '反色', () => app.viewer.invert());
+    mkBtn('invert', '反色', () => {
+      if (mprView) { mprView.invertToggle(); return; }
+      app.viewer.invert();
+    });
     mkBtn('rotateL', '左旋', () => app.viewer.rotate(-1));
     mkBtn('rotateR', '右旋', () => app.viewer.rotate(1));
     mkBtn('flipH', '水平翻转', () => app.viewer.flipH());
     mkBtn('flipV', '垂直翻转', () => app.viewer.flipV());
-    mkBtn('reset', '复位', () => app.viewer.reset());
+    mkBtn('reset', '复位', () => {
+      if (mprView) {
+        mprView.planes.forEach((p) => { p.zoom = 1; p.pan = { x: 0, y: 0 }; });
+        mprView.cross = { x: Math.floor(mprView.vol.nx / 2), y: Math.floor(mprView.vol.ny / 2), z: Math.floor(mprView.vol.nz / 2) };
+        mprView.wc = mprView.vol.wc; mprView.ww = mprView.vol.ww; mprView.invert = false;
+        mprView.renderAll();
+        U.$('#inst-slider').value = mprView.cross.z + 1;
+        return;
+      }
+      app.viewer.reset();
+    });
     bar.appendChild(U.el('div', { class: 'vsep' }));
     presetSel = U.el('select', { class: 'input wl-preset-select', title: '窗宽窗位预设(按设备类型)', style: { width: '108px', padding: '6px' } });
     presetSel.addEventListener('change', () => {
       const opt = presetSel.selectedOptions[0];
-      if (opt && opt._preset !== undefined && app.viewer) app.viewer.applyPreset(opt._preset);
+      if (!opt || opt._preset === undefined) return;
+      if (mprView && mprView.vol) {
+        const v = opt._preset;
+        if (v == null) mprView.applyVoi(mprView.vol.wc, mprView.vol.ww);
+        else if (v === 'wide') mprView.applyVoi(mprView.wc, Math.min(65535, mprView.ww * 2));
+        else if (v === 'narrow') mprView.applyVoi(mprView.wc, Math.max(1, mprView.ww / 2));
+        else if (v === 'auto') {
+          let mn = Infinity, mx = -Infinity;
+          const vol = mprView.vol.vol;
+          for (let i = 0; i < vol.length; i += 131) { const q = vol[i]; if (q < mn) mn = q; if (q > mx) mx = q; }
+          mprView.applyVoi((mn + mx) / 2, Math.max(1, mx - mn));
+        }
+        else mprView.applyVoi(v[0], v[1]);
+        U.$('#inst-label').textContent = 'MPR · WC ' + Math.round(mprView.wc) + '/WW ' + Math.round(mprView.ww);
+        return;
+      }
+      if (app.viewer) app.viewer.applyPreset(opt._preset);
     });
     bar.appendChild(presetSel);
     presetMod = null;
@@ -404,6 +433,13 @@
     });
     bar.appendChild(U.el('div', { class: 'vsep' }));
     mkBtn('image', '导出PNG', () => app.viewer.exportPNG());
+    // MPR: 三平面重建(需 ≥8 层的同尺寸序列)
+    const mprBtn = U.el('button', {
+      class: 'tool-btn', title: 'MPR 多平面重建: 轴位/冠状/矢状三视图 + 十字线联动(需 8 层以上序列)',
+      html: U.icon('layers') + '<span class="lbl">MPR</span>'
+    });
+    mprBtn.onclick = () => toggleMpr(mprBtn);
+    bar.appendChild(mprBtn);
     if (MV.api.serverMode && app.studyData && app.studyData.study) {
       const uid = app.studyData.study.uid;
       if (uid) mkBtn('download', '导出DICOM', () => { location.href = MV.api.exportStudyUrl(uid); });
@@ -428,6 +464,7 @@
         ])
       ]);
       item.onclick = () => {
+        exitMpr();
         app.viewer.setSeries(st);
         buildSeriesList();
         U.$('#vseries').classList.remove('open');
@@ -477,8 +514,20 @@
 
   function buildBottom() {
     const sl = U.$('#inst-slider');
-    sl.oninput = (e) => app.viewer && app.viewer.gotoImage(+e.target.value);
-    U.$('#cine-btn').onclick = () => app.viewer && app.viewer.cineToggle();
+    sl.oninput = (e) => {
+      const n = +e.target.value;
+      if (mprView && mprView.vol) {
+        mprView.cross.z = U.clamp(n - 1, 0, mprView.vol.nz - 1);
+        mprView.renderAll();
+        U.$('#inst-label').textContent = 'MPR · 轴位 ' + n + '/' + mprView.vol.nz + ' · WC ' + Math.round(mprView.wc) + '/WW ' + Math.round(mprView.ww);
+        return;
+      }
+      if (app.viewer) app.viewer.gotoImage(n);
+    };
+    U.$('#cine-btn').onclick = () => {
+      if (mprView) { U.toast('MPR 模式下请先退出 MPR 再播放'); return; }
+      if (app.viewer) app.viewer.cineToggle();
+    };
     const fpsSel = U.$('#cine-fps');
     fpsSel.title = 'CINE 播放速度(帧/秒)';
     fpsSel.onchange = (e) => {
@@ -487,6 +536,54 @@
       // 未播放时也立即反馈当前帧率
       U.$('#cine-btn').textContent = (app.viewer.cineTimer ? '⏸' : '▶') + e.target.value + '/秒';
     };
+  }
+
+  /* ============ MPR 模式 ============ */
+  let mprView = null;
+
+  function toggleMpr(btn) {
+    if (mprView) { exitMpr(btn); return; }
+    const v = app.viewer;
+    const pane = v && v.activePane();
+    const st = pane && pane.stack;
+    if (!st || !st.images.length) { U.toast('没有可重建的序列', 'error'); return; }
+    const framesOfFirst = st.files[0] && st.files[0].frames || 1;
+    if (st.images.length < 8) {
+      U.toast('MPR 需要至少 8 层图像的序列(当前 ' + st.images.length + ' 层)', 'error');
+      return;
+    }
+    if (framesOfFirst > 1) { U.toast('该序列为多帧文件,MPR 暂不支持', 'error'); return; }
+    v.cineStop();
+    const wrap = U.$('#vpanes-wrap');
+    wrap.classList.add('mpr-on');
+    U.$('#vpanes').style.display = 'none';
+    mprView = new MV.mpr.MprView(wrap, st, {
+      onready: (m) => {
+        U.$('#inst-label').textContent = 'MPR · 三平面 · WC ' + Math.round(m.wc) + '/WW ' + Math.round(m.ww);
+        const sl = U.$('#inst-slider');
+        sl.min = 1; sl.max = m.vol.nz; sl.value = m.cross.z + 1;
+      }
+    });
+    const mask = U.el('div', { class: 'vp-load', style: { display: '' } , text: '正在重建体数据(' + st.images.length + ' 层)…' });
+    wrap.appendChild(mask);
+    mprView.build((p) => { mask.textContent = '正在重建体数据 ' + Math.round(p * 100) + '%(' + st.images.length + ' 层)…'; })
+      .then(() => { mask.remove(); })
+      .catch((e) => {
+        mask.remove();
+        U.toast('MPR 失败: ' + e.message, 'error');
+        exitMpr(btn);
+      });
+    btn.classList.add('active');
+    btn._on = true;
+  }
+
+  function exitMpr(btn) {
+    if (mprView) { mprView.destroy(); mprView = null; }
+    U.$('#vpanes-wrap').classList.remove('mpr-on');
+    U.$('#vpanes').style.display = '';
+    if (btn) { btn.classList.remove('active'); btn._on = false; }
+    // 恢复普通视图状态
+    if (app.viewer) app.viewer._notify();
   }
 
   /* ============ 登录 ============ */
