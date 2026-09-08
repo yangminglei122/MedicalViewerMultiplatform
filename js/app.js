@@ -399,6 +399,19 @@
     mprBtn.onclick = () => toggleMpr(mprBtn);
     bar.appendChild(mprBtn);
     mprBtnRef = mprBtn;
+    // 平滑插值开关: 放大时平滑(默认)或像素化(观察原始像素)
+    const smoothBtn = U.el('button', {
+      class: 'tool-btn warn' + (MV.imageSmooth !== false ? ' active' : ''),
+      title: '平滑插值: 开启后放大图像做双线性平滑,关闭则显示原始像素(像素化)',
+      html: U.icon('image') + '<span class="lbl">平滑</span>'
+    });
+    smoothBtn.onclick = () => {
+      MV.imageSmooth = MV.imageSmooth === false ? true : false;
+      smoothBtn.classList.toggle('active', MV.imageSmooth !== false);
+      (app.viewer.panes || []).forEach((p) => p.render());
+      if (mprView) mprView.renderAll();
+    };
+    bar.appendChild(smoothBtn);
     bar.appendChild(U.el('div', { class: 'vsep' }));
 
     TOOLS.forEach(([id, icon, label], i) => {

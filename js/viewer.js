@@ -7,6 +7,9 @@
   window.MV = window.MV || {};
   const U = MV.U;
 
+  // 全局图像插值开关(放大时平滑/像素化), 由工具栏"平滑"按钮切换
+  MV.imageSmooth = true;
+
   const ANNO_COLORS = ['#ffd83d', '#4dd964', '#ff6b81', '#61d9ff', '#ff9f43', '#c56cf0'];
   let annoSeq = 1;
 
@@ -311,7 +314,8 @@
       ctx.translate(t.cx, t.cy);
       ctx.rotate(t.rot * Math.PI / 2);
       ctx.scale(t.s * (t.fh ? -1 : 1), t.s * (t.fv ? -1 : 1));
-      ctx.imageSmoothingEnabled = t.s < 3;
+      ctx.imageSmoothingEnabled = MV.imageSmooth !== false;
+      ctx.imageSmoothingQuality = 'high';
       ctx.drawImage(this.frameCanvas, -fr.cols / 2, -fr.rows / 2);
       ctx.restore();
 

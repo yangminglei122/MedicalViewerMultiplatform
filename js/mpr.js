@@ -160,7 +160,8 @@
       const tmp = this._tmpCanvas || (this._tmpCanvas = document.createElement('canvas'));
       tmp.width = d.w; tmp.height = d.h;
       tmp.getContext('2d').putImageData(img, 0, 0);
-      ctx.imageSmoothingEnabled = scale < 3;
+      ctx.imageSmoothingEnabled = MV.imageSmooth !== false;
+      ctx.imageSmoothingQuality = 'high';
       // drawImage 到物理比例目标区
       ctx.drawImage(tmp, ox, oy, d.w * d.px * scale, d.h * d.py * scale);
 
