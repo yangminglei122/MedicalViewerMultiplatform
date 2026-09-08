@@ -683,10 +683,36 @@ try {
             $pat['sex'] = (string)(isset($patient['sex']) ? $patient['sex'] : $pat['sex']);
 
             $added = 0; $dups = 0; $studiesNew = 0; $studiesMerged = 0; $missing = 0;
+            $transferredFrom = '';
             foreach ($studies as $st) {
                 $studyUid = trim((string)(isset($st['uid']) ? $st['uid'] : ''));
                 if ($studyUid === '') continue;
                 $stSafe = mv_safe_uid($studyUid);
+
+                // 跨患者同检查 UID: 该检查归属以本次确认的患者为准, 旧患者名下整体转移(移目录+删条目)
+                foreach ($idx['patients'] as $opi => $op) {
+                    if (($op['dir'] ?? '') === $pat['dir']) continue;
+                    foreach ($op['studies'] as $osi => $ost) {
+                        if ($ost['uid'] !== $studyUid) continue;
+                        $oldDir = MV_FILES_DIR . '/' . $op['dir'] . '/' . $stSafe;
+                        $newDir = MV_FILES_DIR . '/' . $pat['dir'] . '/' . $stSafe;
+                        if (is_dir($oldDir)) {
+                            if (!is_dir($newDir)) @rename($oldDir, $newDir);
+                            else {
+                                foreach (glob($oldDir . '/*') as $sd) @rename($sd, $newDir . '/' . basename($sd));
+                                @rmdir($oldDir);
+                            }
+                        }
+                        $transferredFrom = $op['name'];
+                        array_splice($idx['patients'][$opi]['studies'], $osi, 1);
+                        if (!count($idx['patients'][$opi]['studies'])) {
+                            @rmdir(MV_FILES_DIR . '/' . $op['dir']);
+                            array_splice($idx['patients'], $opi, 1);
+                        }
+                        break 2;
+                    }
+                }
+
                 unset($target);
                 foreach ($pat['studies'] as &$ex) { if ($ex['uid'] === $studyUid) { $target = &$ex; break; } }
                 unset($ex);
@@ -760,7 +786,7 @@ try {
                     if (count($left) === 0) mv_rmrf($d);
                 }
             }
-            mv_json(array('ok' => true, 'added' => $added, 'dups' => $dups, 'missing' => $missing, 'studiesNew' => $studiesNew, 'studiesMerged' => $studiesMerged));
+            mv_json(array('ok' => true, 'added' => $added, 'dups' => $dups, 'missing' => $missing, 'studiesNew' => $studiesNew, 'studiesMerged' => $studiesMerged, 'transferredFrom' => $transferredFrom));
             break;
         }
 

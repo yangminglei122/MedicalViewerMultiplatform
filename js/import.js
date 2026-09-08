@@ -551,6 +551,7 @@
       const res = await MV.api.post('commit', null, payload);
       U.toast('已入库:新增 ' + res.added + ' 幅' + (res.dups ? ',跳过重复 ' + res.dups + ' 幅' : '') +
         (res.studiesMerged ? ',合并检查 ' + res.studiesMerged : '') +
+        (res.transferredFrom ? ',检查已从「' + res.transferredFrom + '」转移至本患者' : '') +
         (res.missing ? ',⚠ 缺失 ' + res.missing + ' 幅(建议重新导入)' : ''), res.missing ? 'error' : 'ok', res.missing ? 8000 : 3500);
       return true;
     } catch (e) {
