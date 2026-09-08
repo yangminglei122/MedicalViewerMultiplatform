@@ -263,7 +263,20 @@
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, w, h);
-      if (!this.frame) { this._updateCorners(); return; }
+      if (!this.frame) {
+        // 空视口提示(多视图布局下未加载序列的格子)
+        if (!this.stack) {
+          ctx.fillStyle = 'rgba(141, 153, 171, .55)';
+          ctx.font = '13px system-ui, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('空视口', w / 2, h / 2 - 10);
+          ctx.font = '11.5px system-ui, sans-serif';
+          ctx.fillText('先点击此处激活, 再点击左侧序列载入', w / 2, h / 2 + 12);
+          ctx.textAlign = 'left';
+        }
+        this._updateCorners();
+        return;
+      }
 
       // LUT 应用到帧画布
       this.buildLUT();
