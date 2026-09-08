@@ -190,6 +190,7 @@
           await new Promise((r) => setTimeout(r, 800 * attempt));
         }
       }
+      if (result) result.finalBatch = curBatch;   // 回报实际落盘批次(内部重启可能已换批)
       return result;
     },
 

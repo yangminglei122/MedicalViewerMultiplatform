@@ -190,7 +190,8 @@
         let staged;
         try { staged = await api.uploadZipSmart(batch, f, f.name, zProg); }
         catch (e) { U.toast('ZIP 导入失败: ' + e.message, 'error'); continue; }
-        staged.files.forEach((sf) => stagedFiles.push({ batch, id: sf.id, name: sf.name }));
+        const zb = staged.finalBatch || batch;   // 分块重启可能换批, 以实际批次为准
+        staged.files.forEach((sf) => stagedFiles.push({ batch: zb, id: sf.id, name: sf.name }));
       }
 
       // 阶段2: 本地文件并发解析
@@ -489,7 +490,8 @@
               ' · 平均 ' + (doneB / 1048576 / secs).toFixed(1) + ' MB/s · 预计剩余 ' + fmtEta(eta));
           });
         const f = r.files[0];
-        it.stagedId = f.id; it.stagedBatch = localBatch;
+        it.stagedId = f.id;
+        it.stagedBatch = r.finalBatch || localBatch;   // 分块重启可能换批, 以实际批次为准
         uploaded++; uploadedBytes += it.blob.size || 0;
         tickProgress();
       }
@@ -548,7 +550,8 @@
 
       const res = await MV.api.post('commit', null, payload);
       U.toast('已入库:新增 ' + res.added + ' 幅' + (res.dups ? ',跳过重复 ' + res.dups + ' 幅' : '') +
-        (res.studiesMerged ? ',合并检查 ' + res.studiesMerged : ''), 'ok', 3500);
+        (res.studiesMerged ? ',合并检查 ' + res.studiesMerged : '') +
+        (res.missing ? ',⚠ 缺失 ' + res.missing + ' 幅(建议重新导入)' : ''), res.missing ? 'error' : 'ok', res.missing ? 8000 : 3500);
       return true;
     } catch (e) {
       U.toast('导入失败: ' + e.message, 'error', 5000);

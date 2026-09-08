@@ -150,8 +150,14 @@ function mv_account_expired($acc) {
 function mv_need_admin() {
     if (($GLOBALS['mv_role'] ?? '') !== 'admin') mv_fail('需要管理员权限', 403);
 }
+function mv_session_start() {
+    if (session_status() === PHP_SESSION_ACTIVE) return;
+    @session_set_cookie_params(array('httponly' => true, 'samesite' => 'Lax'));
+    session_start();
+}
+
 function mv_auth_check() {
-    if (session_status() !== PHP_SESSION_ACTIVE) session_start();
+    mv_session_start();
     $action = isset($_GET['action']) ? $_GET['action'] : '';
     if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && $action === 'login') {
         $b = mv_body_json();
@@ -370,10 +376,10 @@ function &mv_find_patient(&$idx, $id, $name, $birth) {
         if ($id !== '' && trim((string)$p['id']) === $id) return $p;
     }
     unset($p);
-    // 空 ID 时按姓名+生日匹配
-    if ($id === '') {
+    // 空 ID 时按姓名+生日匹配(两者都缺失时不匹配, 避免把无患者信息的检查错误并入他人)
+    if ($id === '' && $name !== '') {
         foreach ($idx['patients'] as &$p) {
-            if (trim((string)$p['name']) === trim((string)$name) && trim((string)$p['birth']) === trim((string)$birth)) return $p;
+            if (trim((string)$p['name']) === $name && trim((string)$p['birth']) === trim((string)$birth)) return $p;
         }
         unset($p);
     }
@@ -393,7 +399,7 @@ $action = isset($_GET['action']) ? $_GET['action'] : '';
 
 // ping 免登录(前端探测服务器与登录状态)
 if ($action === '' || $action === 'ping') {
-    if (session_status() !== PHP_SESSION_ACTIVE) session_start();
+    mv_session_start();
     $user = isset($_SESSION['mv_user']) ? $_SESSION['mv_user'] : null;
     $role = null;
     if ($user) {
@@ -676,7 +682,7 @@ try {
             $pat['birth'] = (string)(isset($patient['birth']) ? $patient['birth'] : $pat['birth']);
             $pat['sex'] = (string)(isset($patient['sex']) ? $patient['sex'] : $pat['sex']);
 
-            $added = 0; $dups = 0; $studiesNew = 0; $studiesMerged = 0;
+            $added = 0; $dups = 0; $studiesNew = 0; $studiesMerged = 0; $missing = 0;
             foreach ($studies as $st) {
                 $studyUid = trim((string)(isset($st['uid']) ? $st['uid'] : ''));
                 if ($studyUid === '') continue;
@@ -716,9 +722,9 @@ try {
                         $fid = isset($f['id']) ? $f['id'] : '';
                         $fbatch = isset($f['batch']) ? $f['batch'] : $defBatch;
                         $sop = isset($f['sop']) ? $f['sop'] : '';
-                        if (!mv_check_id($fid) || !mv_check_id($fbatch) || $sop === '') continue;
+                        if (!mv_check_id($fid) || !mv_check_id($fbatch) || $sop === '') { $missing++; continue; }
                         $src = MV_TMP_DIR . '/' . $fbatch . '/' . $fid . '.dcm';
-                        if (!is_file($src)) continue;
+                        if (!is_file($src)) { $missing++; continue; }
                         $usedBatches[$fbatch] = true;
                         $fSafe = mv_safe_uid($sop);
                         // 已存在同 SOP → 跳过
@@ -754,7 +760,7 @@ try {
                     if (count($left) === 0) mv_rmrf($d);
                 }
             }
-            mv_json(array('ok' => true, 'added' => $added, 'dups' => $dups, 'studiesNew' => $studiesNew, 'studiesMerged' => $studiesMerged));
+            mv_json(array('ok' => true, 'added' => $added, 'dups' => $dups, 'missing' => $missing, 'studiesNew' => $studiesNew, 'studiesMerged' => $studiesMerged));
             break;
         }
 
@@ -855,7 +861,7 @@ try {
         }
 
         case 'logout': {
-            if (session_status() !== PHP_SESSION_ACTIVE) session_start();
+            mv_session_start();
             unset($_SESSION['mv_user'], $_SESSION['mv_role']);
             mv_json(array('ok' => true));
             break;
