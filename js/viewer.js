@@ -592,6 +592,16 @@
       }
       if (this.pointers.size > 2) return;
 
+      // 右键=缩放, 中键=平移: 任何工具模式下保持不变; 工具绘制/选中仅左键
+      if (e.button === 2 || e.button === 1) {
+        this._cancelPending();
+        this._drag = {
+          mode: e.button === 2 ? 'zoom' : 'pan',
+          sx: e.clientX, sy: e.clientY, ww: this.ww, wl: this.wl, pan: { ...this.pan }, zoom: this.zoom
+        };
+        return;
+      }
+
       const tool = this.viewer.tool;
       const pos = this._local(e);
       const t = this._transform();

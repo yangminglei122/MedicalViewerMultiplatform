@@ -232,7 +232,7 @@
           e.stopPropagation();
           if (await U.confirm('删除检查', '确定删除「' + U.esc(st.desc || '未命名检查') + '」(' + U.fmtDate(st.date) + ')?<br>原始 DICOM 文件将一并删除,不可恢复。', { okText: '删除', danger: true })) {
             try {
-              await MV.api.post('delete-study', null, { uid: st.uid });
+              await MV.api.post('delete-study', null, { sid: st.sid || st.uid });
               U.toast('已删除', 'ok');
               refresh();
             } catch (err) { U.toast('删除失败: ' + err.message, 'error'); }
@@ -259,7 +259,7 @@
     container.appendChild(U.el('div', { class: 'muted', style: { padding: '6px 4px', fontSize: '12px' }, text: '加载序列…' }));
     let series;
     try {
-      const data = await MV.api.get('study', { uid: st.uid });
+      const data = await MV.api.get('study', { sid: st.sid || st.uid });
       series = data.study.series || [];
     } catch (e) {
       container.innerHTML = '';
