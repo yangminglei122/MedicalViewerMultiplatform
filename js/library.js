@@ -33,7 +33,6 @@
 
   function setSearch(t) {
     filters.kw = t;
-    if (U.$('#wl-kw')) U.$('#wl-kw').value = t;
     render();
   }
 
@@ -95,8 +94,7 @@
     if (!box) return;
     box.innerHTML = '';
 
-    const kw = U.el('input', { class: 'input', id: 'wl-kw', placeholder: '搜索: 姓名 / ID / 检查名称 / 检查号', value: filters.kw });
-    kw.addEventListener('input', U.debounce(() => { filters.kw = kw.value.trim(); render(); }, 200));
+
     const from = U.el('input', { class: 'input', type: 'date', id: 'wl-from', title: '开始日期', value: filters.from });
     const to = U.el('input', { class: 'input', type: 'date', id: 'wl-to', title: '结束日期', value: filters.to });
     const applyDate = () => {
@@ -124,7 +122,6 @@
     mods.forEach((m) => chips.appendChild(mkChip(m, m)));
 
     box.appendChild(U.el('div', { class: 'wl-filter-row' }, [
-      U.el('div', { class: 'wl-kw-box' }, [kw]),
       U.el('div', { class: 'wl-date-box' }, [
         U.el('span', { class: 'muted', text: '日期' }), from, U.el('span', { class: 'muted', text: '至' }), to
       ])

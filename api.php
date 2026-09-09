@@ -13,7 +13,7 @@
 error_reporting(E_ALL & ~E_DEPRECATED & ~E_NOTICE);
 // JSON API 严禁任何警告/通知直接输出污染响应体(错误仍写服务器日志)
 @ini_set('display_errors', '0');
-define('MV_VERSION', '1.4.1');
+define('MV_VERSION', '1.6.2');
 
 $__dir = __DIR__;
 if (is_file($__dir . '/config.php')) require_once $__dir . '/config.php';
