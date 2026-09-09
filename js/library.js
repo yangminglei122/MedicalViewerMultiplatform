@@ -216,7 +216,7 @@
 
   function studyRowEl(st) {
     const ex = U.el('button', { class: 'wl-expand', title: '展开序列缩略图', html: U.icon('back', 14) });
-    const row = U.el('div', { class: 'wl-study', onclick: (e) => { if (!e.target.closest('.wl-actions,.wl-expand')) MV.app.openStudy(st.uid); } }, [
+    const row = U.el('div', { class: 'wl-study', onclick: (e) => { if (!e.target.closest('.wl-actions,.wl-expand')) MV.app.openStudy(st.sid || st.uid); } }, [
       U.el('span', { class: 'wl-ex' }, [ex]),
       U.el('span', { class: 'wl-date', text: U.fmtDate(st.date) || '—' }),
       U.el('span', { class: 'wl-desc' }, [
@@ -278,7 +278,7 @@
           U.el('div', { class: 'muted', text: se.files.length + ' 幅' })
         ])
       ]);
-      card.onclick = () => MV.app.openStudy(st.uid);
+      card.onclick = () => MV.app.openStudy(st.sid || st.uid);
       container.appendChild(card);
       // 惰性生成缩略图
       const stack = new MV.viewer.Stack({

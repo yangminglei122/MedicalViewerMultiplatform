@@ -438,7 +438,7 @@
           exists ? U.el('label', { style: { display: 'flex', gap: '6px', alignItems: 'center', marginTop: '6px', fontSize: '13px', color: 'var(--muted)' } }, [
             skip, U.el('span', {
               html: (studyOwner && studyOwner.has(st.uid))
-                ? '⚠ 该检查现登记在「<b>' + U.esc(studyOwner.get(st.uid)) + '</b>」名下;确认导入将把整个检查<b>转移</b>到当前患者(可先修改上方姓名)。勾选则不动它'
+                ? 'ℹ 该检查号与「<b>' + U.esc(studyOwner.get(st.uid)) + '</b>」名下的检查相同;将作为<b>独立检查</b>入库,互不影响'
                 : '该检查已存在,默认合并(重复图像自动去重);勾选则本次跳过'
             })
           ]) : null
@@ -597,7 +597,6 @@
       const res = await MV.api.post('commit', null, payload);
       U.toast('已入库:新增 ' + res.added + ' 幅' + (res.dups ? ',跳过重复 ' + res.dups + ' 幅' : '') +
         (res.studiesMerged ? ',合并检查 ' + res.studiesMerged : '') +
-        (res.transferredFrom ? ',检查已从「' + res.transferredFrom + '」转移至本患者' : '') +
         (res.missing ? ',⚠ 缺失 ' + res.missing + ' 幅(建议重新导入)' : ''), res.missing ? 'error' : 'ok', res.missing ? 8000 : 3500);
       return true;
     } catch (e) {

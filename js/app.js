@@ -212,16 +212,18 @@
   }
 
   /* ============ 打开检查(服务器) ============ */
-  async function openStudy(uid) {
-    location.hash = '#/viewer?uid=' + encodeURIComponent(uid);
+  async function openStudy(sid) {
+    location.hash = '#/viewer?sid=' + encodeURIComponent(sid);
   }
 
   async function openViewerFromHash() {
-    const m = location.hash.match(/uid=([^&]+)/);
-    const uid = m ? decodeURIComponent(m[1]) : '';
-    if (!uid) { showLibrary(); return; }
+    const ms = location.hash.match(/sid=([^&]+)/);
+    const mu = location.hash.match(/uid=([^&]+)/);
+    const sid = ms ? decodeURIComponent(ms[1]) : '';
+    const uid = mu ? decodeURIComponent(mu[1]) : '';
+    if (!sid && !uid) { showLibrary(); return; }
     try {
-      const data = await MV.api.get('study', { uid });
+      const data = await MV.api.get('study', sid ? { sid } : { uid });
       app.studyData = data;
       buildViewerPage([data]);
     } catch (e) {
@@ -303,7 +305,20 @@
     buildToolbar();
     buildSeriesList();
     buildBottom();
-    if (app.stacks.length) viewer.setSeries(app.stacks[0], 0);
+    if (app.stacks.length) {
+      // 成对拆分子序列(交织 DWI 等): 自动双屏同显
+      const bu = MV.viewer.baseUid;
+      const b0 = bu(app.stacks[0].info.uid);
+      const sibling = app.stacks.findIndex((s, i) => i > 0 && bu(s.info.uid) === b0 && s.info.uid !== app.stacks[0].info.uid);
+      if (sibling > 0) {
+        viewer.buildLayout(2);
+        viewer.setSeries(app.stacks[0], 0);
+        viewer.setSeries(app.stacks[sibling], 1);
+        buildSeriesList();
+      } else {
+        viewer.setSeries(app.stacks[0], 0);
+      }
+    }
     if (app.stacks.length > 1 && viewer.layout === 1) { /* 单图启动,用户可切布局 */ }
   }
 
@@ -472,8 +487,8 @@
     bar.appendChild(U.el('div', { class: 'vsep' }));
     mkBtn('image', '导出PNG', () => app.viewer.exportPNG());
     if (MV.api.serverMode && app.studyData && app.studyData.study) {
-      const uid = app.studyData.study.uid;
-      if (uid) mkBtn('download', '导出DICOM', () => { location.href = MV.api.exportStudyUrl(uid); });
+      const sid = app.studyData.study.sid || app.studyData.study.uid;
+      if (sid) mkBtn("download", "导出DICOM", () => { location.href = MV.api.exportStudyUrl(sid); });
     }
     mkBtn('trash', '清除标注', async () => {
       if (app.viewer.hasAnnotations()) {
@@ -496,7 +511,7 @@
       ]);
       item.onclick = () => {
         exitMpr();
-        app.viewer.setSeries(st);
+        loadStackSmart(st);
         buildSeriesList();
         U.$('#vseries').classList.remove('open');
       };
@@ -569,6 +584,25 @@
     };
   }
 
+  /** 装载序列: 拆分子序列(DWI [1/2] 等)自动与其配对双屏同显, 其余单屏 */
+  function loadStackSmart(st) {
+    const v = app.viewer;
+    const bu = MV.viewer.baseUid;
+    const isSub = /\.[sSxX]\d+$/.test(st.info.uid);
+    const sibs = app.stacks.filter((s) => s.info.uid !== st.info.uid && bu(s.info.uid) === bu(st.info.uid));
+    if (isSub && sibs.length && v.layout === 1) {
+      v.buildLayout(2);
+      v.setSeries(st, 0);
+      v.setSeries(sibs[0], 1);
+      v.setActive(0);
+      return;
+    }
+    if (!isSub && v.layout !== 1) {
+      v.buildLayout(1);
+      buildSeriesList();
+    }
+    v.setSeries(st);
+  }
   /* ============ MPR 模式 ============ */
   let mprView = null;
   let mprBtnRef = null;    // MPR 按钮(退出时同步取消高亮)

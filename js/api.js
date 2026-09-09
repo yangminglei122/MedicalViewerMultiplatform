@@ -83,7 +83,7 @@
     fileUrl(f) {
       return this.url('file', { pd: f.pd, st: f.st, se: f.se, f: f.f });
     },
-    exportStudyUrl(uid) { return this.url('export', { uid }); },
+    exportStudyUrl(sid) { return this.url('export', { sid }); },
     exportPatientUrl(dir) { return this.url('export', { dir }); },
 
     async tmpbegin() { return this.post('tmpbegin'); },

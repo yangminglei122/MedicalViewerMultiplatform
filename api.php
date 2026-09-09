@@ -355,6 +355,98 @@ function mv_zip_stream_out($files, $zipName) {
     exit;
 }
 
+/* ---------------- 层位读取与交织序列拆分 ---------------- */
+
+/** 读 DICOM 头部 ImagePositionPatient(前 24KB 内), 返回 "x,y,z"(厘米级取整) 或 null
+ *  字节直搜法: 部分厂商(Philips 等)头部含非常规结构, 顺序遍历会跑偏 */
+function mv_read_pos($path) {
+    $fp = @fopen($path, 'rb');
+    if (!$fp) return null;
+    $head = fread($fp, 24576);
+    fclose($fp);
+    $n = strlen($head);
+    if ($n < 200 || substr($head, 128, 4) !== 'DICM') return null;
+    $tag = "\x20\x00\x32\x00";   // (0020,0032) 小端
+    $off = 132;
+    while (true) {
+        $p = strpos($head, $tag, $off);
+        if ($p === false || $p + 12 > $n) return null;
+        $vr = substr($head, $p + 4, 2);
+        $ok = ($vr === 'DS') || ($vr === 'IS') || (ctype_upper(substr($vr,0,1)) && ctype_upper(substr($vr,1,1)) && !in_array($vr, array('OB', 'OW', 'SQ', 'UN', 'UT')));
+        if (!$ok) { $off = $p + 2; continue; }
+        $vl = unpack('v', substr($head, $p + 6, 2))[1];
+        if ($vl < 8 || $vl > 60 || $p + 8 + $vl > $n) { $off = $p + 2; continue; }
+        $parts = explode(chr(92), rtrim(substr($head, $p + 8, $vl), " " . chr(0)));
+        if (count($parts) < 3) { $off = $p + 2; continue; }
+        return round(floatval($parts[0]) * 100) . ',' . round(floatval($parts[1]) * 100) . ',' . round(floatval($parts[2]) * 100);
+    }
+}
+
+function mv_pos_cache($pd, $stSafe, $st) {
+    $dir = MV_FILES_DIR . '/' . $pd . '/' . $stSafe;
+    $cacheFile = $dir . '/.pos.json';
+    $cache = is_file($cacheFile) ? json_decode((string)file_get_contents($cacheFile), true) : null;
+    if (!is_array($cache)) $cache = array();
+    $dirty = false;
+    foreach ($st['series'] as $se) {
+        $seUid = $se['uid'];
+        if (isset($cache[$seUid]) && count($cache[$seUid]) === count($se['files'])) continue;
+        $posList = array();
+        foreach ($se['files'] as $f) {
+            $posList[] = mv_read_pos($dir . '/' . mv_safe_uid($seUid) . '/' . $f['f'] . '.dcm');
+        }
+        $cache[$seUid] = $posList;
+        $dirty = true;
+    }
+    if ($dirty) @file_put_contents($cacheFile, json_encode($cache));
+    return $cache;
+}
+
+/** 把一个序列按层位出现序虚拟拆分; 返回 [子序列...] */
+function mv_split_interleaved($se, $filesOut, $posList) {
+    if (count($filesOut) < 4 || count($posList) !== count($filesOut)) {
+        return array(array('uid' => $se['uid'], 'desc' => $se['desc'], 'files' => $filesOut));
+    }
+    foreach ($posList as $q) { if ($q === null) return array(array('uid' => $se['uid'], 'desc' => $se['desc'], 'files' => $filesOut)); }
+    $seen = array();
+    $maxOcc = 1;
+    $occ = array();
+    foreach ($posList as $i => $q) {
+        $c = (isset($seen[$q]) ? $seen[$q] : 0) + 1;
+        $seen[$q] = $c;
+        $occ[$i] = $c;
+        if ($c > $maxOcc) $maxOcc = $c;
+    }
+    if ($maxOcc < 2) return array(array('uid' => $se['uid'], 'desc' => $se['desc'], 'files' => $filesOut));
+    $out = array();
+    for ($o = 1; $o <= $maxOcc; $o++) {
+        $sub = array();
+        foreach ($filesOut as $i => $f) if ($occ[$i] === $o) $sub[] = $f;
+        if (!count($sub)) continue;
+        $out[] = array('uid' => $se['uid'] . '.s' . $o, 'desc' => $se['desc'] . ' [' . $o . '/' . $maxOcc . ']', 'files' => $sub);
+    }
+    return $out;
+}
+
+
+/* ---------------- 内部检查主键(sid) ----------------
+ * study 的逻辑主键为导入时生成的 sid(目录名=sid), DICOM StudyInstanceUID 仅作属性。
+ * 跨患者同 UID 的检查天然互不干扰; 存量数据在此惰性补齐。 */
+function mv_migrate_sids(&$idx) {
+    $changed = false;
+    foreach ($idx['patients'] as &$p) {
+        foreach ($p['studies'] as &$st) {
+            if (!empty($st['sid'])) continue;
+            $st['sid'] = bin2hex(random_bytes(8));
+            $st['sdir'] = mv_safe_uid($st['uid']);   // 存量目录名保持 safe(duid)
+            $changed = true;
+        }
+        unset($st);
+    }
+    unset($p);
+    if ($changed) mv_index_save($idx);
+}
+
 /* ---------------- 暂存清理 ---------------- */
 
 function mv_gc_tmp() {
@@ -435,6 +527,7 @@ try {
         case 'list': {
             mv_gc_tmp();
             $idx = mv_index_load();
+            mv_migrate_sids($idx);
             $q = isset($_GET['q']) ? mv_mb_lower(trim($_GET['q'])) : '';
             $out = array();
             foreach ($idx['patients'] as $p) {
@@ -447,7 +540,7 @@ try {
                         if (!empty($se['modality'])) { $smods[$se['modality']] = 1; $mods[$se['modality']] = 1; }
                     }
                     $studies[] = array(
-                        'uid' => $st['uid'], 'date' => $st['date'], 'desc' => $st['desc'],
+                        'uid' => $st['uid'], 'sid' => isset($st['sid']) ? $st['sid'] : '', 'date' => $st['date'], 'desc' => $st['desc'],
                         'accession' => isset($st['accession']) ? $st['accession'] : '',
                         'seriesCount' => count($st['series']), 'instanceCount' => $sc,
                         'modalities' => array_keys($smods)
@@ -475,38 +568,49 @@ try {
         }
 
         case 'study': {
+            // 逻辑主键为 sid; 兼容旧 ?uid=(StudyInstanceUID, 全局唯一时命中)
+            $sid = isset($_GET['sid']) ? $_GET['sid'] : '';
             $uid = isset($_GET['uid']) ? $_GET['uid'] : '';
-            if ($uid === '') mv_fail('缺少 uid');
+            if ($sid === '' && $uid === '') mv_fail('缺少 sid');
             $idx = mv_index_load();
+            mv_migrate_sids($idx);
+            $hits = 0;
             foreach ($idx['patients'] as $p) {
                 foreach ($p['studies'] as $st) {
-                    if ($st['uid'] !== $uid) continue;
+                    if ($sid !== '' ? $st['sid'] !== $sid : $st['uid'] !== $uid) continue;
+                    $hits++;
+                    if ($hits > 1) mv_fail('该检查号在多个患者下存在, 请从列表打开');
+                    $stSafe = $st['sdir'];
+                    $posCache = mv_pos_cache($p['dir'], $stSafe, $st);
                     $series = array();
-                    foreach ($st['series'] as $se) {
+                    foreach ($st['series'] as $sei => $se) {
                         $files = array();
                         foreach ($se['files'] as $f) {
                             $files[] = array(
                                 'sop' => $f['sop'], 'no' => $f['no'], 'frames' => max(1, (int)$f['frames']),
                                 'pd' => $p['dir'],
-                                'st' => mv_safe_uid($st['uid']), 'se' => mv_safe_uid($se['uid']), 'f' => $f['f']
+                                'st' => $stSafe, 'se' => mv_safe_uid($se['uid']), 'f' => $f['f']
                             );
                         }
-                        $series[] = array(
-                            'uid' => $se['uid'], 'number' => $se['number'], 'desc' => $se['desc'],
-                            'modality' => $se['modality'], 'files' => $files
-                        );
+                        // 普适拆分: 同序列内层位重复(交织 DWI/mDIXON 等) → 按层位出现序拆子序列
+                        $posList = isset($posCache[$se['uid']]) ? $posCache[$se['uid']] : array();
+                        foreach (mv_split_interleaved($se, $files, $posList) as $sub) {
+                            $series[] = array(
+                                'uid' => $sub['uid'], 'number' => $se['number'], 'desc' => $sub['desc'],
+                                'modality' => $se['modality'], 'files' => $sub['files']
+                            );
+                        }
                     }
                     usort($series, function ($a, $b) { return (int)$a['number'] - (int)$b['number']; });
                     mv_json(array(
                         'patient' => array('id' => $p['id'], 'name' => $p['name'], 'birth' => $p['birth'], 'sex' => $p['sex']),
-                        'study' => array('uid' => $st['uid'], 'date' => $st['date'], 'desc' => $st['desc'], 'series' => $series)
+                        'study' => array('uid' => $st['uid'], 'sid' => $st['sid'], 'date' => $st['date'], 'desc' => $st['desc'], 'series' => $series)
                     ));
                 }
             }
             mv_fail('未找到该检查', 404);
             break;
         }
-
         case 'file': {
             $pd = isset($_GET['pd']) ? $_GET['pd'] : '';
             $st = isset($_GET['st']) ? $_GET['st'] : '';
@@ -677,6 +781,7 @@ try {
 
             $lock = mv_index_lock();
             $idx = mv_index_load();
+            mv_migrate_sids($idx);
             $pat = &mv_find_patient($idx, isset($patient['id']) ? $patient['id'] : '', isset($patient['name']) ? $patient['name'] : '', isset($patient['birth']) ? $patient['birth'] : '');
             // 以确认后的信息为准
             $pat['id'] = trim((string)(isset($patient['id']) ? $patient['id'] : $pat['id']));
@@ -689,68 +794,15 @@ try {
             foreach ($studies as $st) {
                 $studyUid = trim((string)(isset($st['uid']) ? $st['uid'] : ''));
                 if ($studyUid === '') continue;
-                $stSafe = mv_safe_uid($studyUid);
-
-                // 跨患者同检查 UID: 归属以本次确认的患者为准。
-                // 旧患者名下的条目整体搬入新患者(条目+文件目录), 后续按已存在合并处理
-                foreach ($idx['patients'] as $opi => $op) {
-                    if (($op['dir'] ?? '') === $pat['dir']) continue;
-                    foreach ($op['studies'] as $osi => $ost) {
-                        if ($ost['uid'] !== $studyUid) continue;
-                        $oldDir = MV_FILES_DIR . '/' . $op['dir'] . '/' . $stSafe;
-                        $newDir = MV_FILES_DIR . '/' . $pat['dir'] . '/' . $stSafe;
-                        if (is_dir($oldDir)) {
-                            if (!is_dir($newDir)) @rename($oldDir, $newDir);
-                            else {
-                                foreach (glob($oldDir . '/*') as $sd) @rename($sd, $newDir . '/' . basename($sd));
-                                @rmdir($oldDir);
-                            }
-                        }
-                        $transferredFrom = $op['name'];
-                        // 条目并入新患者(新患者尚无此检查时直接搬入; 已有则按序列合并)
-                        $hasHere = false;
-                        foreach ($pat['studies'] as &$hex) { if ($hex['uid'] === $studyUid) { $hasHere = true; break; } }
-                        unset($hex);
-                        if (!$hasHere) {
-                            $pat['studies'][] = $ost;
-                        } else {
-                            foreach ($ost['series'] as $ose) {
-                                $hit = false;
-                                foreach ($pat['studies'] as &$hex2) {
-                                    if ($hex2['uid'] !== $studyUid) continue;
-                                    foreach ($hex2['series'] as &$hse) {
-                                        if ($hse['uid'] === $ose['uid']) {
-                                            $sops = array();
-                                            foreach ($hse['files'] as $hf) $sops[$hf['sop']] = 1;
-                                            foreach ($ose['files'] as $of) if (!isset($sops[$of['sop']])) $hse['files'][] = $of;
-                                            $hit = true; break;
-                                        }
-                                    }
-                                    unset($hse);
-                                    if ($hit) break;
-                                }
-                                unset($hex2);
-                                if (!$hit) {
-                                    foreach ($pat['studies'] as &$hex3) { if ($hex3['uid'] === $studyUid) { $hex3['series'][] = $ose; break; } }
-                                    unset($hex3);
-                                }
-                            }
-                        }
-                        array_splice($idx['patients'][$opi]['studies'], $osi, 1);
-                        if (!count($idx['patients'][$opi]['studies'])) {
-                            @rmdir(MV_FILES_DIR . '/' . $op['dir']);
-                            array_splice($idx['patients'], $opi, 1);
-                        }
-                        break 2;
-                    }
-                }
 
                 unset($target);
                 foreach ($pat['studies'] as &$ex) { if ($ex['uid'] === $studyUid) { $target = &$ex; break; } }
                 unset($ex);
                 if (!isset($target) || !$target) {
-                    $target = array('uid' => $studyUid, 'date' => (string)(isset($st['date']) ? $st['date'] : ''),
+                    $target = array('uid' => $studyUid, 'sid' => bin2hex(random_bytes(8)), 'sdir' => '',
+                        'date' => (string)(isset($st['date']) ? $st['date'] : ''),
                         'desc' => (string)(isset($st['desc']) ? $st['desc'] : ''), 'accession' => '', 'series' => array());
+                    $target['sdir'] = $target['sid'];
                     $pat['studies'][] = &$target;
                     $studiesNew++;
                 } else {
@@ -759,6 +811,7 @@ try {
                     if (!empty($st['desc'])) $target['desc'] = (string)$st['desc'];
                 }
                 if (isset($st['accession'])) $target['accession'] = (string)$st['accession'];
+                $stSafe = $target['sdir'];   // 目录名: 新检查=sid, 存量=原目录名
 
                 foreach ((isset($st['series']) ? $st['series'] : array()) as $se) {
                     $seUid = trim((string)(isset($se['uid']) ? $se['uid'] : ''));
@@ -824,14 +877,16 @@ try {
 
         case 'delete-study': {
             $j = mv_body_json();
+            $sid = isset($j['sid']) ? $j['sid'] : '';
             $uid = isset($j['uid']) ? $j['uid'] : '';
-            if ($uid === '') mv_fail('缺少 uid');
+            if ($sid === '' && $uid === '') mv_fail('缺少参数');
             $lock = mv_index_lock();
             $idx = mv_index_load();
+            mv_migrate_sids($idx);
             foreach ($idx['patients'] as $pi => $p) {
                 foreach ($p['studies'] as $si => $st) {
-                    if ($st['uid'] !== $uid) continue;
-                    mv_rmrf(MV_FILES_DIR . '/' . $p['dir'] . '/' . mv_safe_uid($st['uid']));
+                    if ($sid !== '' ? $st['sid'] !== $sid : $st['uid'] !== $uid) continue;
+                    mv_rmrf(MV_FILES_DIR . '/' . $p['dir'] . '/' . $st['sdir']);
                     array_splice($idx['patients'][$pi]['studies'], $si, 1);
                     if (count($idx['patients'][$pi]['studies']) === 0) {
                         @rmdir(MV_FILES_DIR . '/' . $p['dir']);
@@ -887,10 +942,12 @@ try {
         }
 
         case 'export': {
-            $uid = isset($_GET['uid']) ? $_GET['uid'] : '';      // 检查 UID
+            $sid = isset($_GET['sid']) ? $_GET['sid'] : '';
+            $uid = isset($_GET['uid']) ? $_GET['uid'] : '';      // 兼容旧链接
             $dir = isset($_GET['dir']) ? $_GET['dir'] : '';      // 或患者目录(全部检查)
             if ($uid === '' && $dir === '') mv_fail('缺少参数');
             $idx = mv_index_load();
+            mv_migrate_sids($idx);
             $files = array();
             $zipBase = '';
             $count = 0;
@@ -898,7 +955,7 @@ try {
                 foreach ($st['series'] as $se) {
                     $seDir = mv_safe_name(($se['number'] !== '' ? sprintf('%02d', (int)$se['number']) . '-' : '') . ($se['desc'] !== '' ? $se['desc'] : $se['uid']));
                     foreach ($se['files'] as $f) {
-                        $path = MV_FILES_DIR . '/' . $p['dir'] . '/' . mv_safe_uid($st['uid']) . '/' . mv_safe_uid($se['uid']) . '/' . $f['f'] . '.dcm';
+                        $path = MV_FILES_DIR . '/' . $p['dir'] . '/' . $st['sdir'] . '/' . mv_safe_uid($se['uid']) . '/' . $f['f'] . '.dcm';
                         if (!is_file($path)) continue;
                         $files[] = array('path' => $path, 'name' => mv_safe_name($p['id'] !== '' ? $p['id'] : $p['name']) . '/' . mv_safe_name($st['date'] . ' ' . $st['desc']) . '/' . $seDir . '/' . sprintf('%06d', (int)$f['no']) . '.dcm');
                         $count++;
@@ -908,7 +965,8 @@ try {
             foreach ($idx['patients'] as $p) {
                 if ($dir !== '' && $p['dir'] !== $dir) continue;
                 foreach ($p['studies'] as $st) {
-                    if ($uid !== '' && $st['uid'] !== $uid) continue;
+                    if ($sid !== '' && $st['sid'] !== $sid) continue;
+                    if ($sid === '' && $uid !== '' && $st['uid'] !== $uid) continue;
                     $collect($p, $st);
                     if ($zipBase === '') $zipBase = ($uid !== '' ? $p['name'] . '_' . $st['date'] . '_' . $st['desc'] : $p['name'] . '_全部检查');
                 }

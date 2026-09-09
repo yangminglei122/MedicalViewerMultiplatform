@@ -166,6 +166,7 @@
         this.lutKey = '';
         this.fit();
         this.viewer._notify();
+        this.viewer._syncSiblings(this);
         this._prefetch(i);
       } catch (err) {
         if (token !== this.loadToken) return;
@@ -373,16 +374,15 @@
           U.esc((pid ? 'ID ' + pid : '')) +
           (sexText ? ' · ' + U.esc(sexText) : '') + (birthText ? ' · ' + U.esc(birthText) : '') +
           (age ? ' · ' + U.esc(age) : '');
-        c.tr.innerHTML =
-          U.esc(ds.str(TAG.StudyDescription) || '检查') + '<br>' +
-          U.esc(U.fmtDate(ds.str(TAG.StudyDate))) +
-          (ds.str(TAG.Modality) ? ' · ' + U.esc(ds.str(TAG.Modality)) : '');
         const p = ds.p;
+        c.tr.innerHTML =
+          U.esc(this.stack.info.desc || ('序列 ' + (this.stack.info.number || ''))) + '<br>' +
+          U.esc(ds.str(TAG.StudyDescription) || '检查') + ' · ' + U.esc(U.fmtDate(ds.str(TAG.StudyDate)));
         c.br.innerHTML =
-          (this.stack.info.desc || ('序列 ' + (this.stack.info.number || ''))) + '<br>' +
           '图 ' + (this.imgIdx + 1) + '/' + this.total +
           (p && p.thickness ? ' · 层厚 ' + p.thickness.toFixed(1) + 'mm' : '') +
-          (p && p.spacingX ? ' · ' + p.spacingX.toFixed(2) + '×' + p.spacingY.toFixed(2) + 'mm' : '');
+          (p && p.spacingX ? ' · ' + p.spacingX.toFixed(2) + '×' + p.spacingY.toFixed(2) + 'mm' : '') +
+          (ds.str(TAG.Modality) ? ' · ' + U.esc(ds.str(TAG.Modality)) : '');
       }
       const zoomStr = (this.scale / (this.frame ? Math.min(this.el.clientWidth / this.frame.cols, this.el.clientHeight / this.frame.rows) : 1)).toFixed(2);
       let probeStr = '';
@@ -1037,6 +1037,25 @@
 
     setTool(t) { this.tool = t; }
 
+    /** 成对子序列(如 DWI [1/2]/[2/2])同步: 其他视口加载同基础 UID 序列时, 跟随当前层号与窗宽窗位 */
+    _syncSiblings(pane) {
+      if (this._syncing) return;
+      this._syncing = true;
+      try {
+        const base = baseUid(pane.stack && pane.stack.info.uid);
+        this.panes.forEach((p) => {
+          if (p === pane || !p.stack) return;
+          if (baseUid(p.stack.info.uid) !== base) return;
+          if (p.imgIdx !== pane.imgIdx || p.ww !== pane.ww || p.wl !== pane.wl) {
+            p._userVoi = true;
+            p.ww = pane.ww; p.wl = pane.wl;
+            p.showImage(pane.imgIdx);
+            p.render();
+          }
+        });
+      } finally { this._syncing = false; }
+    }
+
     /* CINE */
     cineToggle() { this.cineTimer ? this.cineStop() : this.cineStart(); }
     cineStart() {
@@ -1200,5 +1219,7 @@
     return c.toDataURL();
   }
 
-  MV.viewer = { Viewer, Stack, Pane, thumbFromStack, NON_IMAGE_MODALITIES };
+  const baseUid = (u) => String(u || '').replace(/\.(s\d+|x\d+)$/, '');
+
+  MV.viewer = { Viewer, Stack, Pane, thumbFromStack, NON_IMAGE_MODALITIES, baseUid };
 })();
