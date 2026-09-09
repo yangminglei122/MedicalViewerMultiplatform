@@ -139,6 +139,9 @@
       i = U.clamp(i, 0, this.total - 1);
       this.imgIdx = i;
       const img = this.stack.images[i];
+      // 翻层/换图: 未完成的进行中标注作废(它锚定在旧层), ROI 预览框同理
+      if (this.pendingAnno) { this.pendingAnno = null; }
+      if (this.roiRect) { this.roiRect = null; }
       this.loading = !this.stack.instCache.has(img.file.sop);
       this.loadMask.style.display = this.loading ? '' : 'none';
       try {

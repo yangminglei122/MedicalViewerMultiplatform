@@ -58,6 +58,9 @@
       class: 'btn sm ghost', title: '退出登录', text: '退出',
       onclick: async () => {
         await MV.api.logout();
+        exitMpr();
+        if (app.viewer) { app.viewer.destroy(); app.viewer = null; }
+        location.hash = '#/';
         U.toast('已退出', 'ok');
         showLogin();
       }
