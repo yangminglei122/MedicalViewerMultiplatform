@@ -172,7 +172,9 @@ function mv_auth_check() {
         $_SESSION['mv_user'] = $name;
         $_SESSION['mv_role'] = $accounts[$name]['role'];
         $_SESSION['mv_can_export'] = !empty($accounts[$name]['can_export']) ? 1 : 0;
-        mv_json(array('ok' => true, 'user' => $name, 'role' => $accounts[$name]['role']));
+        $lRole = $accounts[$name]['role'];
+        mv_json(array('ok' => true, 'user' => $name, 'role' => $lRole,
+            'canExport' => $lRole === 'admin' ? true : !empty($accounts[$name]['can_export'])));
     }
     if (isset($_SESSION['mv_user']) && $_SESSION['mv_user'] !== '') {
         $name = $_SESSION['mv_user'];

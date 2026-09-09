@@ -11,7 +11,8 @@
   };
 
   /** 服务器图像文件字节获取(带缓存), ref = {pd,st,se,f} */
-  const bytesCache = new U.LRU(400);
+  // 按字节上限缓存(600MB): 条数上限在大文件(45MB DR)下会撑爆内存
+  const bytesCache = new U.LRUBytes(600 * 1024 * 1024);
   MV.getBytes = async function (ref) {
     const key = ref.pd + '/' + ref.st + '/' + ref.se + '/' + ref.f;
     if (bytesCache.has(key)) return new Uint8Array(bytesCache.get(key));

@@ -138,6 +138,40 @@
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 3000);
   };
 
+  /** 按字节上限的 LRU(大文件缓存防内存爆栈) */
+  U.LRUBytes = class {
+    constructor(maxBytes, sizeOf) {
+      this.maxBytes = maxBytes;
+      this.sizeOf = sizeOf || ((v) => (v && v.byteLength) || 0);
+      this.map = new Map();
+      this.bytes = 0;
+    }
+    get(k) {
+      if (!this.map.has(k)) return undefined;
+      const v = this.map.get(k);
+      this.map.delete(k); this.map.set(k, v);
+      return v;
+    }
+    set(k, v) {
+      if (this.map.has(k)) { this.bytes -= this.sizeOf(this.map.get(k)); this.map.delete(k); }
+      this.map.set(k, v);
+      this.bytes += this.sizeOf(v);
+      this._evict();
+    }
+    _evict() {
+      while (this.bytes > this.maxBytes && this.map.size > 1) {
+        const k = this.map.keys().next().value;
+        this.bytes -= this.sizeOf(this.map.get(k));
+        this.map.delete(k);
+      }
+    }
+    has(k) { return this.map.has(k); }
+    delete(k) {
+      if (this.map.has(k)) { this.bytes -= this.sizeOf(this.map.get(k)); this.map.delete(k); }
+    }
+    clear() { this.map.clear(); this.bytes = 0; }
+  };
+
   /** 简易 LRU 缓存 */
   U.LRU = class {
     constructor(max) { this.max = max; this.map = new Map(); }
