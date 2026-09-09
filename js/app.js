@@ -486,7 +486,7 @@
     });
     bar.appendChild(U.el('div', { class: 'vsep' }));
     mkBtn('image', '导出PNG', () => app.viewer.exportPNG());
-    if (MV.api.serverMode && app.studyData && app.studyData.study) {
+    if (MV.api.canExport !== false && MV.api.serverMode && app.studyData && app.studyData.study) {
       const sid = app.studyData.study.sid || app.studyData.study.uid;
       if (sid) mkBtn("download", "导出DICOM", () => { location.href = MV.api.exportStudyUrl(sid); });
     }
@@ -679,6 +679,7 @@
         if (r && r.ok) {
           U.$('#login-pass').value = '';
           U.$('#login-overlay').classList.add('hidden');
+          await MV.api.init();
           buildUserBox();
           route();
         } else U.toast('登录失败', 'error');
@@ -703,6 +704,7 @@
         U.el('td', { text: a.name + (a.role === 'admin' ? '(管理员)' : '') }),
         U.el('td', { text: a.note || '' }),
         U.el('td', { style: { color: expired ? 'var(--danger)' : '' }, text: fmtExp(a.expires) + (expired ? '(已过期)' : '') }),
+        U.el('td', { text: a.canExport ? '✓' : '—', title: a.canExport ? '允许导出' : '禁止导出' }),
         U.el('td', {}, [
           a.role !== 'admin' ? U.el('button', {
             class: 'btn sm', text: '+7天', title: '延长 7 天',
@@ -733,11 +735,13 @@
       [['1', '有效期 1 天'], ['7', '有效期 7 天'], ['30', '有效期 30 天'], ['90', '有效期 90 天'], ['365', '有效期 1 年']]
         .map(([v, t]) => U.el('option', { value: v, text: t, selected: v === '7' ? '' : null })));
     const noteIn = U.el('input', { class: 'input', placeholder: '备注(给谁用)' });
+    const exportChk = U.el('input', { type: 'checkbox' });
+    exportChk.checked = true;   // 默认允许下载/导出
     const addBtn = U.el('button', {
       class: 'btn primary sm', text: '创建临时账号',
       onclick: async () => {
         try {
-          await MV.api.accountAdd(nameIn.value.trim(), passIn.value, +daysSel.value, noteIn.value.trim());
+          await MV.api.accountAdd(nameIn.value.trim(), passIn.value, +daysSel.value, noteIn.value.trim(), exportChk.checked);
           U.toast('已创建 ' + nameIn.value.trim(), 'ok');
           overlay.remove();
           showAccounts();
@@ -747,7 +751,7 @@
 
     const tbl = U.el('table', { class: 'acc-table' }, [
       U.el('thead', {}, [U.el('tr', {}, [
-        U.el('th', { text: '用户名' }), U.el('th', { text: '备注' }), U.el('th', { text: '有效期至' }), U.el('th', { text: '操作' })
+        U.el('th', { text: '用户名' }), U.el('th', { text: '备注' }), U.el('th', { text: '有效期至' }), U.el('th', { text: '导出' }), U.el('th', { text: '操作' })
       ])]),
       U.el('tbody', {}, rows)
     ]);
@@ -761,6 +765,7 @@
             U.el('div', { class: 'field', style: { margin: 0 } }, [U.el('label', { text: '密码' }), passIn]),
             U.el('div', { class: 'field', style: { margin: 0 } }, [U.el('label', { text: '有效期' }), daysSel]),
             U.el('div', { class: 'field', style: { margin: 0 } }, [U.el('label', { text: '备注' }), noteIn]),
+            U.el('label', { class: 'field', style: { margin: 0, display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12.5px' } }, [exportChk, U.el('span', { text: '允许下载图像' })]),
             addBtn
           ]),
           U.el('div', { style: { maxHeight: '46vh', overflowY: 'auto', marginTop: '12px' } }, [tbl]),

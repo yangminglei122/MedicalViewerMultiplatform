@@ -23,6 +23,7 @@
         this.auth = !!(j && j.auth);
         this.user = (j && j.user) || null;
         this.role = (j && j.role) || null;
+        this.canExport = !!(j && j.canExport);
         this.needLogin = this.serverMode && this.auth && !this.user;
         return this.serverMode;
       } catch (e) {
@@ -37,6 +38,7 @@
         this.needLogin = false;
         this.user = r.user || user;
         this.role = r.role || 'user';
+        this.canExport = (this.role === 'admin') ? true : !!r.canExport;
         return r;
       }
       return r;
@@ -48,7 +50,7 @@
     },
 
     accountsList() { return this.get('accounts-list'); },
-    accountAdd(name, pass, days, note) { return this.post('account-add', null, { name, pass, days, note }); },
+    accountAdd(name, pass, days, note, canExport) { return this.post('account-add', null, { name, pass, days, note, canExport: canExport ? 1 : 0 }); },
     accountDel(name) { return this.post('account-del', null, { name }); },
     accountSetPass(name, pass) { return this.post('account-setpass', null, { name, pass }); },
     accountRenew(name, days) { return this.post('account-renew', null, { name, days }); },

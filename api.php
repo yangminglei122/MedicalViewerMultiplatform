@@ -171,6 +171,7 @@ function mv_auth_check() {
         if (mv_account_expired($accounts[$name])) mv_fail('该账号已过期,请联系管理员', 401);
         $_SESSION['mv_user'] = $name;
         $_SESSION['mv_role'] = $accounts[$name]['role'];
+        $_SESSION['mv_can_export'] = !empty($accounts[$name]['can_export']) ? 1 : 0;
         mv_json(array('ok' => true, 'user' => $name, 'role' => $accounts[$name]['role']));
     }
     if (isset($_SESSION['mv_user']) && $_SESSION['mv_user'] !== '') {
@@ -179,6 +180,7 @@ function mv_auth_check() {
         if (isset($accounts[$name]) && !mv_account_expired($accounts[$name])) {
             $GLOBALS['mv_user'] = $name;
             $GLOBALS['mv_role'] = $accounts[$name]['role'];
+            $GLOBALS['mv_can_export'] = !empty($accounts[$name]['can_export']) ? 1 : 0;
             return;
         }
         unset($_SESSION['mv_user'], $_SESSION['mv_role']);
@@ -505,7 +507,8 @@ if ($action === '' || $action === 'ping') {
             unset($_SESSION['mv_user'], $_SESSION['mv_role']);
         }
     }
-    mv_json(array('ok' => true, 'version' => MV_VERSION, 'server' => true, 'auth' => true, 'user' => $user, 'role' => $role));
+    mv_json(array('ok' => true, 'version' => MV_VERSION, 'server' => true, 'auth' => true, 'user' => $user, 'role' => $role,
+        'canExport' => ($role === 'admin') ? true : (bool)($_SESSION['mv_can_export'] ?? false)));
 }
 
 $mutating = in_array($action, array('tmpbegin', 'tmpfile', 'tmpzip', 'chunk', 'commit', 'delete-study', 'delete-patient', 'edit-patient', 'login', 'logout', 'account-add', 'account-del', 'account-setpass', 'account-renew'), true);
@@ -942,6 +945,7 @@ try {
         }
 
         case 'export': {
+            if (($GLOBALS['mv_role'] ?? '') !== 'admin' && empty($GLOBALS['mv_can_export'])) mv_fail('该账号没有导出权限', 403);
             $sid = isset($_GET['sid']) ? $_GET['sid'] : '';
             $uid = isset($_GET['uid']) ? $_GET['uid'] : '';      // 兼容旧链接
             $dir = isset($_GET['dir']) ? $_GET['dir'] : '';      // 或患者目录(全部检查)
@@ -978,7 +982,7 @@ try {
 
         case 'logout': {
             mv_session_start();
-            unset($_SESSION['mv_user'], $_SESSION['mv_role']);
+            unset($_SESSION['mv_user'], $_SESSION['mv_role'], $_SESSION['mv_can_export']);
             mv_json(array('ok' => true));
             break;
         }
@@ -993,7 +997,8 @@ try {
                     'expires' => isset($a['expires']) ? $a['expires'] : '',
                     'note' => isset($a['note']) ? $a['note'] : '',
                     'created' => isset($a['created']) ? $a['created'] : '',
-                    'expired' => mv_account_expired($a)
+                    'expired' => mv_account_expired($a),
+                    'canExport' => ($a['role'] ?? '') === 'admin' ? true : !empty($a['can_export'])
                 );
             }
             mv_json(array('accounts' => $out));
@@ -1015,6 +1020,7 @@ try {
             $accounts[$name] = array(
                 'hash' => password_hash($pass, PASSWORD_DEFAULT),
                 'role' => 'user',
+                'can_export' => !empty($b['canExport']) ? 1 : 0,
                 'expires' => date('YmdHis', time() + $days * 86400),
                 'note' => $note !== '' ? $note : '临时账号',
                 'created' => date('YmdHis')
