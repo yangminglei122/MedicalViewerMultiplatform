@@ -17,6 +17,7 @@
     StudyDate: T(0x0008, 0x0020),
     SeriesDate: T(0x0008, 0x0021),
     StudyTime: T(0x0008, 0x0030),
+    ImagerPixelSpacing: T(0x0018, 0x1164),
     AccessionNumber: T(0x0008, 0x0050),
     Modality: T(0x0008, 0x0060),
     StudyDescription: T(0x0008, 0x1030),
@@ -28,6 +29,12 @@
     PatientAge: T(0x0010, 0x1010),
     SliceThickness: T(0x0018, 0x0050),
     SpacingBetweenSlices: T(0x0018, 0x0088),
+    RepetitionTime: T(0x0018, 0x0080),
+    EchoTime: T(0x0018, 0x0081),
+    KVP: T(0x0018, 0x0060),
+    Manufacturer: T(0x0008, 0x0070),
+    ModelName: T(0x0008, 0x1090),
+    StudyTime: T(0x0008, 0x0030),
     ImagerPixelSpacing: T(0x0018, 0x1164),
     KVP: T(0x0018, 0x0060),
     PatientPosition: T(0x0018, 0x5100),
@@ -100,6 +107,8 @@
     d[T(0x0008, 0x0090)] = 'PN';   // 检查医师
     d[T(0x0008, 0x1090)] = 'LO';   // 设备型号
     d[T(0x0018, 0x0015)] = 'CS';   // 检查部位
+    d[TAG.RepetitionTime] = 'DS'; d[TAG.EchoTime] = 'DS';
+    d[T(0x0008, 0x0070)] = 'LO'; d[T(0x0008, 0x1090)] = 'LO'; d[T(0x0008, 0x0030)] = 'TM';
     d[T(0x0018, 0x0050)] = 'DS';
     d[T(0x0018, 0x1030)] = 'LO';   // 协议名
     d[T(0x0008, 0x0022)] = 'DA'; d[T(0x0008, 0x0023)] = 'DA';
@@ -352,6 +361,9 @@
       intercept: isNaN(ds.dbl(TAG.RescaleIntercept)) ? 0 : ds.dbl(TAG.RescaleIntercept),
       thickness: ds.dbl(TAG.SliceThickness),
       spacingBetween: ds.dbl(TAG.SpacingBetweenSlices),
+      tr: ds.dbl(TAG.RepetitionTime), te: ds.dbl(TAG.EchoTime), kvp: ds.dbl(TAG.KVP),
+      manu: ds.str(TAG.Manufacturer), model: ds.str(TAG.ModelName),
+      studyTime: ds.str(TAG.StudyTime),
       position: ds.nums(TAG.ImagePositionPatient),
       orientation: ds.nums(TAG.ImageOrientationPatient),
       sliceLocation: ds.dbl(TAG.SliceLocation),

@@ -371,18 +371,27 @@
         const age = /^0+Y?$/.test(ageRaw.trim()) ? '' : ageRaw;
         c.tl.innerHTML =
           U.esc(name || '未知姓名') + '<br>' +
-          U.esc((pid ? 'ID ' + pid : '')) +
-          (sexText ? ' · ' + U.esc(sexText) : '') + (birthText ? ' · ' + U.esc(birthText) : '') +
-          (age ? ' · ' + U.esc(age) : '');
+          U.esc(pid ? 'ID ' + pid : '') +
+          ((sexText || birthText) ? '<br>' + [sexText, birthText].filter(Boolean).join(' ') + (age ? ' (' + U.esc(age) + ')' : '') : '');
         const p = ds.p;
+        // 右上: 检查信息(描述 / 日期时间 / 厂家·设备)
+        const tstr = U.fmtTime(p.studyTime);
+        const dev = [p.manu, p.model].filter(Boolean).join(' ');
         c.tr.innerHTML =
-          U.esc(this.stack.info.desc || ('序列 ' + (this.stack.info.number || ''))) + '<br>' +
-          U.esc(ds.str(TAG.StudyDescription) || '检查') + ' · ' + U.esc(U.fmtDate(ds.str(TAG.StudyDate)));
+          U.esc(ds.str(TAG.StudyDescription) || '检查') + '<br>' +
+          U.esc(U.fmtDate(studyDate)) + (tstr ? ' ' + U.esc(tstr) : '') +
+          (dev ? '<br>' + U.esc(dev) : '');
+        // 右下: 序列信息(描述 / Img n/N / 几何 / 采集参数)
+        const modality = ds.str(TAG.Modality);
         c.br.innerHTML =
-          '图 ' + (this.imgIdx + 1) + '/' + this.total +
-          (p && p.thickness ? ' · 层厚 ' + p.thickness.toFixed(1) + 'mm' : '') +
-          (p && p.spacingX ? ' · ' + p.spacingX.toFixed(2) + '×' + p.spacingY.toFixed(2) + 'mm' : '') +
-          (ds.str(TAG.Modality) ? ' · ' + U.esc(ds.str(TAG.Modality)) : '');
+          U.esc(this.stack.info.desc || ('序列 ' + (this.stack.info.number || ''))) + '<br>' +
+          'Img: ' + (this.imgIdx + 1) + '/' + this.total + (modality ? ' · ' + U.esc(modality) : '') + '<br>' +
+          (p && p.thickness ? '层厚 ' + p.thickness.toFixed(1) + 'mm' : '') +
+          (p && p.spacingBetween ? ' / 间距 ' + p.spacingBetween.toFixed(1) + 'mm' : '') +
+          (p && p.spacingX ? '<br>' + p.spacingX.toFixed(2) + '×' + p.spacingY.toFixed(2) + 'mm' : '') +
+          (p && isFinite(p.tr) && p.tr > 0 ? '<br>TR ' + (p.tr >= 1000 ? (p.tr / 1000).toFixed(2) + 's' : Math.round(p.tr) + 'ms') : '') +
+          (p && isFinite(p.te) && p.te > 0 ? ' TE ' + Math.round(p.te) + 'ms' : '') +
+          (p && isFinite(p.kvp) && p.kvp > 0 ? '<br>' + p.kvp + ' kVp' : '');
       }
       const zoomStr = (this.scale / (this.frame ? Math.min(this.el.clientWidth / this.frame.cols, this.el.clientHeight / this.frame.rows) : 1)).toFixed(2);
       let probeStr = '';
