@@ -83,7 +83,8 @@
 
   function buildFilterBar() {
     const mods = allModalities();
-    const key = mods.join(',');
+    // 缓存键包含当前选中设备: 否则点击 chip 后列表未变会短路, 高亮不更新
+    const key = mods.join(',') + '|' + Array.from(filters.mods).sort().join(',');
     if (key === chipKey && U.$('#wl-filter')) {
       // 数据未变,仅刷新统计
       renderStats();
@@ -95,8 +96,8 @@
     box.innerHTML = '';
 
 
-    const from = U.el('input', { class: 'input', type: 'date', id: 'wl-from', title: '开始日期', value: filters.from });
-    const to = U.el('input', { class: 'input', type: 'date', id: 'wl-to', title: '结束日期', value: filters.to });
+    const from = U.el('input', { class: 'input wl-date', type: 'date', id: 'wl-from', title: '开始日期', value: filters.from });
+    const to = U.el('input', { class: 'input wl-date', type: 'date', id: 'wl-to', title: '结束日期', value: filters.to });
     const applyDate = () => {
       filters.from = d8(from.value);
       filters.to = d8(to.value);
@@ -104,6 +105,8 @@
     };
     from.addEventListener('change', applyDate);
     to.addEventListener('change', applyDate);
+    const clearDate = U.el('button', { class: 'wl-mini-btn', text: '✕', title: '清除日期' });
+    clearDate.onclick = () => { from.value = ''; to.value = ''; applyDate(); };
 
     const chips = U.el('div', { class: 'wl-chips' });
     const mkChip = (label, val) => {
@@ -122,11 +125,10 @@
     mods.forEach((m) => chips.appendChild(mkChip(m, m)));
 
     box.appendChild(U.el('div', { class: 'wl-filter-row' }, [
-      U.el('div', { class: 'wl-date-box' }, [
-        U.el('span', { class: 'muted', text: '日期' }), from, U.el('span', { class: 'muted', text: '至' }), to
-      ])
+      U.el('span', { class: 'wl-cap', text: '日期' }), from, U.el('span', { class: 'muted', text: '—' }), to, clearDate,
+      U.el('div', { class: 'spacer', style: { flex: 1 } }),
+      chips
     ]));
-    box.appendChild(chips);
   }
 
   function renderStats() {

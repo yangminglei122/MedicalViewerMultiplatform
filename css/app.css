@@ -102,10 +102,17 @@ main { flex: 1; min-height: 0; }
 
 /* 筛选栏 */
 #wl-filter { margin-bottom: 4px; }
-.wl-filter-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-.wl-date-box { display: flex; gap: 6px; align-items: center; }
-.wl-date-box .input { width: 138px; padding: 7px 8px; }
-.wl-chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 4px; }
+/* 筛选栏: 单行紧凑(日期组 + 设备chips 同行, 桌面不换行) */
+.wl-filter-row { display: flex; gap: 8px; align-items: center; flex-wrap: nowrap; margin-bottom: 2px; }
+.wl-cap { font-size: 12.5px; color: var(--muted); flex-shrink: 0; }
+.wl-date { width: 132px; padding: 6px 6px 6px 8px; }
+.wl-mini-btn {
+  width: 24px; height: 30px; border: none; border-radius: 6px; background: transparent;
+  color: var(--muted); cursor: pointer; font-size: 12px; flex-shrink: 0;
+}
+.wl-mini-btn:hover { background: var(--panel3); color: var(--text); }
+.wl-chips { display: flex; gap: 5px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+.wl-chips::-webkit-scrollbar { display: none; }
 .wl-chip {
   padding: 3px 12px; border-radius: 16px; font-size: 12.5px;
   background: var(--panel2); color: var(--muted);
@@ -414,9 +421,8 @@ main { flex: 1; min-height: 0; }
 
   /* 工作列表 → 卡片式堆叠 */
   .wl-head { display: none; }
-  .wl-filter-row { align-items: center; }
-  .wl-date-box { justify-content: space-between; }
-  .wl-date-box .input { flex: 1; min-width: 0; }
+  .wl-filter-row { flex-wrap: wrap; row-gap: 6px; }
+  .wl-date { flex: 1; min-width: 118px; width: auto; }
   .wl-study {
     grid-template-columns: 24px 1fr auto;
     grid-template-rows: auto auto;
