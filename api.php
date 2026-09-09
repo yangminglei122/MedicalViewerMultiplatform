@@ -968,11 +968,13 @@ try {
                     }
                 }
             };
+            $uidHits = 0;
             foreach ($idx['patients'] as $p) {
                 if ($dir !== '' && $p['dir'] !== $dir) continue;
                 foreach ($p['studies'] as $st) {
                     if ($sid !== '' && $st['sid'] !== $sid) continue;
                     if ($sid === '' && $uid !== '' && $st['uid'] !== $uid) continue;
+                    if ($sid === '' && $uid !== '') { $uidHits++; if ($uidHits > 1) mv_fail('该检查号在多个患者下存在, 请从列表导出', 400); }
                     $collect($p, $st);
                     if ($zipBase === '') $zipBase = ($uid !== '' ? $p['name'] . '_' . $st['date'] . '_' . $st['desc'] : $p['name'] . '_全部检查');
                 }
