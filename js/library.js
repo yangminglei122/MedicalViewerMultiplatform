@@ -124,9 +124,17 @@
     chips.appendChild(mkChip('全部设备', null));
     mods.forEach((m) => chips.appendChild(mkChip(m, m)));
 
+    const dateGroup = U.el('div', { class: 'wl-date-group' }, [from, U.el('span', { class: 'wl-tilde', text: '~' }), to]);
+    const refreshClear = () => {
+      const has = !!(from.value || to.value);
+      clearDate.style.display = has ? '' : 'none';
+    };
+    from.addEventListener('change', refreshClear);
+    to.addEventListener('change', refreshClear);
+    refreshClear();
     box.appendChild(U.el('div', { class: 'wl-filter-row' }, [
-      U.el('span', { class: 'wl-cap', text: '日期' }), from, U.el('span', { class: 'muted', text: '—' }), to, clearDate,
-      U.el('div', { class: 'spacer', style: { flex: 1 } }),
+      dateGroup, clearDate,
+      U.el('div', { class: 'wl-fsep' }),
       chips
     ]));
   }
