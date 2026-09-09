@@ -600,7 +600,9 @@
         const series = [];
         st.series.forEach((se) => {
           series.push({
-            uid: se.uid, number: se.number, desc: se.desc, modality: se.modality,
+            // 入库统一用原始序列 uid(去掉前端拆分后缀 .sN):
+            // 展示层由服务端按层位虚拟拆分, 避免库里同时存在原始+拆分两套序列
+            uid: se.uid.replace(/\.[sS]\d+$/, ''), number: se.number, desc: se.desc.replace(/ \[\d+\/\d+\]$/, ''), modality: se.modality,
             files: se.items.map((it) => ({ batch: it.stagedBatch, id: it.stagedId, sop: it.sop, no: it.no, frames: it.frames }))
           });
         });
