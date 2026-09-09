@@ -424,23 +424,29 @@
         const exists = existingStudyUids.has(st.uid);
         const descInput = U.el('input', { class: 'input', value: st.desc, style: { flex: 1, minWidth: '110px' } });
         const dateInput = U.el('input', { class: 'input', value: U.fmtDate(st.date), style: { width: '120px' }, placeholder: 'YYYY-MM-DD' });
-        const skip = U.el('input', { type: 'checkbox' });
-        if (exists) {
-          // 默认合并(重复图像按 SOP 自动去重); 勾选则本次跳过
-          skip.addEventListener('change', () => { if (skip.checked) skipStudies.add(st.uid); else skipStudies.delete(st.uid); });
-        }
+        // 每个检查: 导入 / 跳过 切换(默认导入)
+        const btnIn = U.el('button', { class: 'btn sm primary', text: '✓ 导入', title: '导入此检查' });
+        const btnSkip = U.el('button', { class: 'btn sm', text: '跳过', title: '本次不导入此检查' });
+        const setSkip = (on) => {
+          if (on) skipStudies.add(st.uid); else skipStudies.delete(st.uid);
+          btnIn.classList.toggle('primary', !on);
+          btnIn.style.opacity = on ? '.45' : '';
+          btnSkip.classList.toggle('danger', on);
+          updateOkBtn();
+        };
+        btnIn.onclick = () => setSkip(false);
+        btnSkip.onclick = () => setSkip(true);
         const card = U.el('div', { class: 'plan-study' }, [
           U.el('div', { class: 'head' }, [
             descInput, dateInput,
-            mods.map(m => U.el('span', { class: 'badge ' + (m || '').toLowerCase(), text: m })).filter(x => x)
+            mods.map(m => U.el('span', { class: 'badge ' + (m || '').toLowerCase(), text: m })).filter(x => x),
+            U.el('span', { style: { display: 'flex', gap: '4px', marginLeft: 'auto' } }, [btnIn, btnSkip])
           ]),
           U.el('div', { class: 'muted', style: { fontSize: '12.5px' }, text: seriesCount + ' 个序列 · ' + instCount + ' 幅图像' }),
-          exists ? U.el('label', { style: { display: 'flex', gap: '6px', alignItems: 'center', marginTop: '6px', fontSize: '13px', color: 'var(--muted)' } }, [
-            skip, U.el('span', {
-              html: (studyOwner && studyOwner.has(st.uid))
-                ? '该检查号与「<b>' + U.esc(studyOwner.get(st.uid)) + '</b>」名下的检查相同: 将作为<b>独立检查</b>入库到当前患者, 互不影响<br><b>无需勾选</b>; 仅当本次不想导入此检查时才勾选'
-                : '该检查已存在, 默认合并(重复图像自动去重); <b>无需勾选</b>; 仅当本次不想导入此检查时才勾选'
-            })
+          exists ? U.el('div', { style: { marginTop: '6px', fontSize: '13px', color: 'var(--muted)' } }, [
+            (studyOwner && studyOwner.has(st.uid))
+              ? '该检查号与「' + studyOwner.get(st.uid) + '」名下的检查相同: 将作为独立检查入库到当前患者, 互不影响'
+              : '该检查在库中已存在: 将合并, 重复图像自动去重'
           ]) : null
         ]);
         st._descInput = descInput;
@@ -465,7 +471,20 @@
 
       const btnPreview = U.el('button', { class: 'btn', text: '仅预览(不入库)', onclick: () => done('preview') });
       const btnCancel = U.el('button', { class: 'btn', text: '取消', onclick: () => done('cancel') });
-      const btnOk = U.el('button', { class: 'btn primary', text: server ? '确认导入' : '确认(本地模式)', onclick: () => done('ok') });
+      const btnOk = U.el('button', { class: 'btn primary', text: '确认导入', onclick: () => done('ok') });
+      // 主按钮联动: 全部检查都选"跳过"时, 语义变为"跳过此患者"
+      function updateOkBtn() {
+        const all = group.studies.size;
+        const skipped = Array.from(group.studies.keys()).filter((u) => skipStudies.has(u)).length;
+        if (skipped >= all) {
+          btnOk.textContent = '跳过此患者';
+          btnOk.classList.remove('primary');
+        } else {
+          btnOk.textContent = '确认导入 (' + (all - skipped) + '/' + all + ')';
+          btnOk.classList.add('primary');
+        }
+      }
+      updateOkBtn();
 
       const overlay = U.el('div', { class: 'modal-overlay' }, [
         U.el('div', { class: 'modal wide' }, [
