@@ -951,7 +951,7 @@ try {
             $sid = isset($_GET['sid']) ? $_GET['sid'] : '';
             $uid = isset($_GET['uid']) ? $_GET['uid'] : '';      // 兼容旧链接
             $dir = isset($_GET['dir']) ? $_GET['dir'] : '';      // 或患者目录(全部检查)
-            if ($uid === '' && $dir === '') mv_fail('缺少参数');
+            if ($sid === '' && $uid === '' && $dir === '') mv_fail('缺少参数');
             $idx = mv_index_load();
             mv_migrate_sids($idx);
             $files = array();
