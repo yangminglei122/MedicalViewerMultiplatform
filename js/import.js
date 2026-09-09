@@ -438,8 +438,8 @@
           exists ? U.el('label', { style: { display: 'flex', gap: '6px', alignItems: 'center', marginTop: '6px', fontSize: '13px', color: 'var(--muted)' } }, [
             skip, U.el('span', {
               html: (studyOwner && studyOwner.has(st.uid))
-                ? 'ℹ 该检查号与「<b>' + U.esc(studyOwner.get(st.uid)) + '</b>」名下的检查相同;将作为<b>独立检查</b>入库,互不影响'
-                : '该检查已存在,默认合并(重复图像自动去重);勾选则本次跳过'
+                ? '该检查号与「<b>' + U.esc(studyOwner.get(st.uid)) + '</b>」名下的检查相同: 将作为<b>独立检查</b>入库到当前患者, 互不影响<br><b>无需勾选</b>; 仅当本次不想导入此检查时才勾选'
+                : '该检查已存在, 默认合并(重复图像自动去重); <b>无需勾选</b>; 仅当本次不想导入此检查时才勾选'
             })
           ]) : null
         ]);
