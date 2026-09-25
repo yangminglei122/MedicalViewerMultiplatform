@@ -335,7 +335,7 @@
   }
 
   function onViewerState(s) {
-    if (!s) return;
+    if (!s || !app.viewer) return;   // 销毁后节流回调仍可能触发(退出登录/返回列表)
     U.$('#inst-label').textContent = '图 ' + s.idx + '/' + s.total + ' · WC ' + Math.round(s.wl) + '/WW ' + Math.round(s.ww);
     const sl = U.$('#inst-slider');
     sl.max = s.total; sl.value = s.idx;
@@ -596,23 +596,25 @@
     };
   }
 
-  /** 装载序列: 拆分子序列(DWI [1/2] 等)自动与其配对双屏同显, 其余单屏 */
+  /** 装载序列: 拆分子序列(DWI [1/2] 等)自动与下一子序列配对双屏; 普通序列尊重当前多视口布局 */
   function loadStackSmart(st) {
     const v = app.viewer;
     const bu = MV.viewer.baseUid;
     const isSub = /\.[sSxX]\d+$/.test(st.info.uid);
     const sibs = app.stacks.filter((s) => s.info.uid !== st.info.uid && bu(s.info.uid) === bu(st.info.uid));
-    if (isSub && sibs.length && v.layout === 1) {
-      v.buildLayout(2);
+    if (isSub && sibs.length && v.layout <= 2) {
+      // 伙伴优先取"序号+1"(最后一组回绕到第一组), 双屏下切换子序列时两屏同步换对
+      const m = String(st.info.uid).match(/\.s(\d+)$/);
+      let partner = null;
+      if (m) partner = sibs.find((s) => String(s.info.uid).endsWith('.s' + (+m[1] + 1))) || sibs[0];
+      else partner = sibs[0];
+      if (v.layout === 1) v.buildLayout(2);
       v.setSeries(st, 0);
-      v.setSeries(sibs[0], 1);
+      v.setSeries(partner, 1);
       v.setActive(0);
       return;
     }
-    if (!isSub && v.layout !== 1) {
-      v.buildLayout(1);
-      buildSeriesList();
-    }
+    // 普通序列: 载入到激活视口, 不强制坍缩布局(多视口对比阅读时点序列应留在对应格子)
     v.setSeries(st);
   }
   /* ============ MPR 模式 ============ */
@@ -660,6 +662,7 @@
 
   function exitMpr(btn) {
     if (mprView) { mprView.destroy(); mprView = null; }
+    window.__mpr = null;   // 测试/调试引用一并清除, 避免体数据滞留内存
     U.$('#vpanes-wrap').classList.remove('mpr-on');
     U.$('#vpanes').style.display = '';
     const b = btn || mprBtnRef;

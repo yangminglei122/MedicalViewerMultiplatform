@@ -148,6 +148,7 @@
       try {
         const inst = await this.stack.instance(img.file);
         if (token !== this.loadToken) return;
+        this._curInst = inst;   // 当前帧实例强引用: MPR 装载/多视口会把 LRU 挤掉, 退回本帧渲染时不能依赖缓存命中
         const frame = await inst.dec.getFrame(img.frame);
         if (token !== this.loadToken) return;
         this.frame = frame;
@@ -210,8 +211,9 @@
       let key = kind + '|' + this.ww + '|' + this.wl + '|' + this.invert;
       if (key === this.lutKey && this.lut) return;
       this.lutKey = key;
-      const ds = this.stack.instCache.get(this.image.file.sop);
-      const p = ds ? ds.ds.p : { slope: 1, intercept: 0, signed: false };
+      // 优先用当前帧实例的强引用: 实例可能已被 LRU 逐出(如 MPR 体装载后), 回退参数会算错 LUT
+      const inst = this._curInst || this.stack.instCache.get(this.image.file.sop);
+      const p = inst ? inst.ds.p : { slope: 1, intercept: 0, signed: false };
       const size = kind === 'gray16' ? 65536 : 256;
       const lut = new Uint8Array(size);
       const lo = this.wl - this.ww / 2, hi = this.wl + this.ww / 2;
@@ -341,7 +343,7 @@
     }
 
     _spacing() {
-      const inst = this.stack && this.stack.instCache.get(this.image.file.sop);
+      const inst = this._curInst || (this.stack && this.stack.instCache.get(this.image.file.sop));
       const p = inst ? inst.ds.p : null;
       return { sx: p && p.spacingX > 0 ? p.spacingX : 0, sy: p && p.spacingY > 0 ? p.spacingY : 0 };
     }
@@ -358,7 +360,7 @@
 
     _updateCorners() {
       if (!this.stack) return;
-      const inst = this.stack.instCache.get(this.image.file.sop);
+      const inst = this._curInst || this.stack.instCache.get(this.image.file.sop);
       const ds = inst ? inst.ds : this.stack.header;
       const TAG = MV.TAG;
       const c = this.corners;
@@ -400,7 +402,7 @@
       const zoomStr = (this.scale / (this.frame ? Math.min(this.el.clientWidth / this.frame.cols, this.el.clientHeight / this.frame.rows) : 1)).toFixed(2);
       let probeStr = '';
       if (this.probeInfo && this.frame) {
-        const instH = this.stack.instCache.get(this.image.file.sop);
+        const instH = this._curInst || this.stack.instCache.get(this.image.file.sop);
         const unit = instH && instH.ds.p && instH.ds.p.intercept ? ' HU' : '';
         probeStr = '<br>(' + this.probeInfo.x + ', ' + this.probeInfo.y + ') ' + Math.round(this.probeInfo.v) + unit;
       }
@@ -505,7 +507,7 @@
       x = Math.round(x); y = Math.round(y);
       if (x < 0 || y < 0 || x >= this.frame.cols || y >= this.frame.rows) return NaN;
       const raw = this.frame.pixels[y * this.frame.cols + x];
-      const inst = this.stack.instCache.get(this.image.file.sop);
+      const inst = this._curInst || this.stack.instCache.get(this.image.file.sop);
       return inst ? inst.ds.eff(raw) : raw;
     }
     _spacingPx() { const s = this._spacing(); return { sx: s.sx || 1, sy: s.sy || 1, cal: this._calibrated() }; }
@@ -553,7 +555,7 @@
     _probeVal(a) {
       const p = a.pts[0];
       const v = this._effAt(p.x, p.y);
-      const inst = this.stack.instCache.get(this.image.file.sop);
+      const inst = this._curInst || this.stack.instCache.get(this.image.file.sop);
       const unit = inst && inst.ds.p && inst.ds.p.intercept ? ' HU' : '';
       return (isFinite(v) ? v.toFixed(0) : '?') + unit + ' (' + Math.round(p.x) + ',' + Math.round(p.y) + ')';
     }
