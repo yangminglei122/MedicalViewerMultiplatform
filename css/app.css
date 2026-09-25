@@ -310,6 +310,21 @@ input.wl-date[type='date'] {
 .series-item:hover { background: var(--panel2); }
 .series-item.active { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
 .series-item img { width: 56px; height: 56px; object-fit: contain; background: #000; border-radius: 6px; flex-shrink: 0; }
+.series-item .sthumb { width: 56px; flex-shrink: 0; }
+.series-item .sthumb img { display: block; }
+/* 序列预载进度条(缩略图下方): 加载中=主题色, 暂停/超出缓存预算=灰色, 完成后隐藏 */
+.series-item .sbar { height: 3px; margin-top: 4px; border-radius: 2px; background: rgba(255, 255, 255, .12); overflow: hidden; }
+.series-item .sbar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .25s ease; }
+.series-item .sbar.paused > i { background: var(--muted); }
+/* 移动端序列加载浮层(视图窗口顶部居中, 加载结束自动移除; 不拦截触控) */
+#preload-tip {
+  position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 20;
+  pointer-events: none; min-width: 150px; padding: 7px 12px 8px;
+  background: rgba(13, 16, 20, .82); border: 1px solid var(--border); border-radius: 10px;
+  font-size: 12px; color: var(--text); text-align: center;
+}
+#preload-tip .tip-bar { height: 3px; margin-top: 5px; border-radius: 2px; background: rgba(255, 255, 255, .15); overflow: hidden; }
+#preload-tip .tip-bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .25s ease; }
 .series-item .sinfo { min-width: 0; flex: 1; }
 .series-item .sdesc { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .series-item .ssub { font-size: 11px; color: var(--muted); }

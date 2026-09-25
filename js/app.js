@@ -14,15 +14,99 @@
   /** 服务器图像文件字节获取(带缓存), ref = {pd,st,se,f} */
   // 按字节上限缓存(600MB): 条数上限在大文件(45MB DR)下会撑爆内存
   const bytesCache = new U.LRUBytes(600 * 1024 * 1024);
+  const bytesInflight = new Map();   // 进行中的请求: 预载与阅片同时要同一文件时只下载一次
+  const bytesKey = (ref) => ref.pd + '/' + ref.st + '/' + ref.se + '/' + ref.f;
   MV.getBytes = async function (ref) {
-    const key = ref.pd + '/' + ref.st + '/' + ref.se + '/' + ref.f;
+    const key = bytesKey(ref);
     if (bytesCache.has(key)) return new Uint8Array(bytesCache.get(key));
-    const r = await fetch(MV.api.fileUrl(ref), { credentials: 'same-origin' });
-    if (!r.ok) throw new Error('获取图像文件失败');
-    const buf = await r.arrayBuffer();
-    bytesCache.set(key, buf);
-    return new Uint8Array(buf);
+    let p = bytesInflight.get(key);
+    if (!p) {
+      p = (async () => {
+        const r = await fetch(MV.api.fileUrl(ref), { credentials: 'same-origin' });
+        if (!r.ok) throw new Error('获取图像文件失败');
+        const buf = await r.arrayBuffer();
+        bytesCache.set(key, buf);
+        return buf;
+      })();
+      bytesInflight.set(key, p);
+      p.then(() => bytesInflight.delete(key), () => bytesInflight.delete(key));
+    }
+    return new Uint8Array(await p);
   };
+  MV.hasBytes = (ref) => bytesCache.has(bytesKey(ref));
+
+  /* ============ 序列预载(缩略图下进度条) ============
+   * 切换序列后把整个序列原始文件预取进字节缓存, 翻层/CINE/MPR 不再等网络.
+   * 只预载当前各视口显示的序列; 切走即暂停(进度保留, 切回续传).
+   * 单次预载上限 400MB, 给 600MB 字节缓存留余量, 防大序列把自己前半段挤出缓存 */
+  const PRELOAD_BUDGET = 400 * 1024 * 1024;
+  let preloadToken = 0;
+  let preloadStacksNow = [];   // 本轮预载的序列(移动端浮层汇总用)
+
+  function preloadShownStacks() {
+    const token = ++preloadToken;
+    preloadStacksNow = [];
+    if (!app.viewer) { updatePreloadTip(); return; }
+    const run = { token, bytes: 0 };
+    const stacks = [...new Set(app.viewer.panes.map((p) => p.stack).filter(Boolean))];
+    preloadStacksNow = stacks;
+    stacks.forEach((st) => preloadStack(st, run));
+  }
+
+  /** 移动端: 序列列表收在抽屉里看不到缩略图进度条, 改在视图窗口顶部显示临时浮层, 加载结束即关闭 */
+  function updatePreloadTip() {
+    let tip = U.$('#preload-tip');
+    const mobile = window.matchMedia('(max-width: 860px)').matches;
+    let done = 0, total = 0, loading = false;
+    preloadStacksNow.forEach((st) => {
+      const pr = st._pre;
+      if (!pr) return;
+      done += pr.done; total += pr.total;
+      if (pr.state === 'loading') loading = true;
+    });
+    if (!mobile || !loading || !total) { if (tip) tip.remove(); return; }
+    if (!tip) {
+      tip = U.el('div', { id: 'preload-tip' }, [U.el('span'), U.el('div', { class: 'tip-bar' }, [U.el('i')])]);
+      U.$('#vpanes-wrap').appendChild(tip);
+    }
+    tip.firstChild.textContent = '正在加载序列 ' + done + '/' + total;
+    tip.lastChild.firstChild.style.width = Math.round(done / total * 100) + '%';
+  }
+
+  async function preloadStack(st, run) {
+    const files = st.files.filter((f) => f.ref);   // 本地预览文件不走网络, 不显示进度
+    if (!files.length) return;
+    const pr = st._pre = { done: files.filter((f) => MV.hasBytes(f.ref)).length, total: files.length, state: 'loading' };
+    if (pr.done >= pr.total) { pr.state = 'done'; updatePreloadBar(st); return; }
+    updatePreloadBar(st);
+    const alive = () => run.token === preloadToken && run.bytes < PRELOAD_BUDGET;
+    await U.runPool(files, 4, async (f) => {
+      if (!alive() || MV.hasBytes(f.ref)) return;
+      try {
+        const b = await MV.getBytes(f.ref);
+        run.bytes += b.byteLength;
+        pr.done++;
+        updatePreloadBar(st);
+      } catch (e) { /* 单个失败忽略, 阅片时会再取 */ }
+    });
+    // 以缓存实际状态为准(期间可能有被阅片请求命中/被逐出的)
+    pr.done = files.filter((f) => MV.hasBytes(f.ref)).length;
+    pr.state = pr.done >= pr.total ? 'done' : 'paused';
+    updatePreloadBar(st);
+  }
+
+  function updatePreloadBar(st) {
+    updatePreloadTip();
+    const bar = st._barEl;
+    if (!bar || !bar.isConnected) return;
+    const pr = st._pre;
+    const show = pr && pr.state !== 'done';
+    bar.style.display = show ? '' : 'none';
+    if (!show) return;
+    bar.classList.toggle('paused', pr.state === 'paused');
+    bar.firstChild.style.width = (pr.total ? Math.round(pr.done / pr.total * 100) : 0) + '%';
+    bar.title = (pr.state === 'paused' ? '已暂停 · ' : '加载中 · ') + '已缓存 ' + pr.done + '/' + pr.total;
+  }
 
   /* ============ 启动 ============ */
   async function boot() {
@@ -76,6 +160,9 @@
   }
 
   function showLibrary() {
+    preloadToken++;   // 离开阅读器: 停止预载
+    preloadStacksNow = [];
+    updatePreloadTip();
     exitMpr();
     if (app.viewer) { app.viewer.destroy(); app.viewer = null; }
     U.$('#page-viewer').classList.add('hidden');
@@ -338,6 +425,7 @@
       } else {
         viewer.setSeries(app.stacks[0], 0);
       }
+      preloadShownStacks();
     }
     if (app.stacks.length > 1 && viewer.layout === 1) { /* 单图启动,用户可切布局 */ }
   }
@@ -523,8 +611,10 @@
     box.innerHTML = '';
     app.stacks.forEach((st) => {
       const img = U.el('img', { alt: '', loading: 'lazy' });
+      const bar = U.el('div', { class: 'sbar', style: { display: 'none' } }, [U.el('i')]);
+      st._barEl = bar;
       const item = U.el('div', { class: 'series-item' + (app.viewer.panes.some((p) => p.stack === st) ? ' active' : '') }, [
-        img,
+        U.el('div', { class: 'sthumb' }, [img, bar]),
         U.el('div', { class: 'sinfo' }, [
           U.el('div', { class: 'sdesc', text: st.info.desc || ('序列 ' + (st.info.number || '')) }),
           U.el('div', { class: 'ssub', text: (st.info.modality ? st.info.modality + ' · ' : '') + st.images.length + ' 幅' + (framesOf(st) ? ' ×' + framesOf(st) + '帧' : '') })
@@ -534,9 +624,11 @@
         exitMpr();
         loadStackSmart(st);
         buildSeriesList();
+        preloadShownStacks();
         U.$('#vseries').classList.remove('open');
       };
       box.appendChild(item);
+      updatePreloadBar(st);   // 列表重建后恢复进度显示
     });
     // 滚动时继续加载进入视口的缩略图(灌注等大量序列时避免一次性全量拉取)
     if (!box._thumbScrollBound) {
