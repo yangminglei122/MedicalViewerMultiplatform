@@ -278,6 +278,7 @@
     pause: '<path d="M8 5v14M16 5v14"/>',
     layout1: '<rect x="4" y="4" width="16" height="16" rx="1"/>',
     layout2: '<rect x="3" y="4" width="8" height="16" rx="1"/><rect x="13" y="4" width="8" height="16" rx="1"/>',
+    layout3: '<rect x="2.5" y="4" width="5.6" height="16" rx="1"/><rect x="9.2" y="4" width="5.6" height="16" rx="1"/><rect x="15.9" y="4" width="5.6" height="16" rx="1"/>',
     layout4: '<rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/>',
     info: '<circle cx="12" cy="12" r="9"/><path d="M12 10v6m0-9v.5"/>',
     image: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M5 17l5-4 3 2 4-4 3 3"/>',

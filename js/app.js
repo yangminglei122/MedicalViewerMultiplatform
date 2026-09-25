@@ -318,14 +318,12 @@
     buildSeriesList();
     buildBottom();
     if (app.stacks.length) {
-      // 成对拆分子序列(交织 DWI 等): 自动双屏同显
-      const bu = MV.viewer.baseUid;
-      const b0 = bu(app.stacks[0].info.uid);
-      const sibling = app.stacks.findIndex((s, i) => i > 0 && bu(s.info.uid) === b0 && s.info.uid !== app.stacks[0].info.uid);
-      if (sibling > 0) {
-        viewer.buildLayout(2);
-        viewer.setSeries(app.stacks[0], 0);
-        viewer.setSeries(app.stacks[sibling], 1);
+      // 拆分子序列组(交织 DWI 等): 按组员数量整组同屏(2组→双屏/3组→三屏/4组→四屏)
+      const group = subUidGroup(app.stacks[0]);
+      if (group.length > 1) {
+        const n = Math.min(group.length, 4);
+        viewer.buildLayout(n);
+        for (let i = 0; i < n; i++) viewer.setSeries(group[i], i);
         buildSeriesList();
       } else {
         viewer.setSeries(app.stacks[0], 0);
@@ -491,7 +489,7 @@
       app.viewer.reset();
     });
     bar.appendChild(U.el('div', { class: 'vsep' }));
-    [['layout1', '单图', 1], ['layout2', '双图', 2], ['layout4', '四图', 4]].forEach(([icon, label, n]) => {
+    [['layout1', '单图', 1], ['layout2', '双图', 2], ['layout3', '三图', 3], ['layout4', '四图', 4]].forEach(([icon, label, n]) => {
       const b = U.el('button', { class: 'tool-btn', title: label, html: U.icon(icon) + '<span class="lbl">' + label + '</span>' });
       b.onclick = () => { app.viewer.buildLayout(n); buildSeriesList(); };
       bar.appendChild(b);
@@ -596,25 +594,39 @@
     };
   }
 
-  /** 装载序列: 拆分子序列(DWI [1/2] 等)自动与下一子序列配对双屏; 普通序列尊重当前多视口布局 */
+  /** 拆分子序列的序号(".s2" → 2; 非拆分返回 0) */
+  const subSuffixNum = (uid) => {
+    const m = String(uid).match(/\.s(\d+)$/i);
+    return m ? +m[1] : 0;
+  };
+
+  /** 与 st 同属一个拆分组(同基础 UID)的全部序列栈, 按序号排序 */
+  function subUidGroup(st) {
+    const bu = MV.viewer.baseUid;
+    const base = bu(st.info.uid);
+    return app.stacks
+      .filter((s) => bu(s.info.uid) === base)
+      .sort((a, b) => subSuffixNum(a.info.uid) - subSuffixNum(b.info.uid));
+  }
+
+  /** 装载序列: 拆分组(交织 DWI 等)整组同屏(按组员数自动分屏, 最多四屏);
+   *  普通序列载入激活视口, 尊重当前多视口布局 */
   function loadStackSmart(st) {
     const v = app.viewer;
-    const bu = MV.viewer.baseUid;
-    const isSub = /\.[sSxX]\d+$/.test(st.info.uid);
-    const sibs = app.stacks.filter((s) => s.info.uid !== st.info.uid && bu(s.info.uid) === bu(st.info.uid));
-    if (isSub && sibs.length && v.layout <= 2) {
-      // 伙伴优先取"序号+1"(最后一组回绕到第一组), 双屏下切换子序列时两屏同步换对
-      const m = String(st.info.uid).match(/\.s(\d+)$/);
-      let partner = null;
-      if (m) partner = sibs.find((s) => String(s.info.uid).endsWith('.s' + (+m[1] + 1))) || sibs[0];
-      else partner = sibs[0];
-      if (v.layout === 1) v.buildLayout(2);
-      v.setSeries(st, 0);
-      v.setSeries(partner, 1);
-      v.setActive(0);
+    const group = subUidGroup(st);
+    if (group.length > 1) {
+      const n = Math.min(group.length, 4);
+      const showing = v.panes.slice(0, n).map((p) => (p.stack ? p.stack.info.uid : '')).join(',');
+      const want = group.slice(0, n).map((s) => s.info.uid).join(',');
+      if (showing !== want || v.layout !== n) {
+        if (v.layout !== n) v.buildLayout(n);
+        for (let i = 0; i < n; i++) v.setSeries(group[i], i);
+      }
+      // 点击组内某一子序列 → 激活它所在的视口
+      const gi = group.indexOf(st);
+      v.setActive(gi >= 0 && gi < n ? gi : 0);
       return;
     }
-    // 普通序列: 载入到激活视口, 不强制坍缩布局(多视口对比阅读时点序列应留在对应格子)
     v.setSeries(st);
   }
   /* ============ MPR 模式 ============ */
