@@ -134,10 +134,13 @@
     get total() { return this.stack ? this.stack.images.length : 0; }
     get image() { return this.stack ? this.stack.images[this.imgIdx] : null; }
 
-    async showImage(i, resetView) {
+    /** fromSync: 由兄弟视口联动触发 —— 完成后不再反向推送层号(否则跟随窗的旧加载完成时会把主窗拽回旧层) */
+    async showImage(i, resetView, fromSync) {
       if (!this.stack || !this.total) return;
       const token = ++this.loadToken;
       i = U.clamp(i, 0, this.total - 1);
+      // 选中标注的下标只对本层有效: 换层后不清空, Del 键会删掉新层上同下标的另一个标注
+      if (i !== this.imgIdx) this.selected = -1;
       this.imgIdx = i;
       const img = this.stack.images[i];
       // 翻层/换图: 未完成的进行中标注作废(它锚定在旧层), ROI 预览框同理
@@ -171,7 +174,7 @@
         this.lutKey = '';
         this.fit();
         this.viewer._notify();
-        this.viewer._syncSiblings(this);
+        this.viewer._syncSiblings(this, fromSync);
         this._prefetch(i);
       } catch (err) {
         if (token !== this.loadToken) return;
@@ -291,7 +294,7 @@
       // LUT 应用到帧画布
       this.buildLUT();
       const fr = this.frame;
-      if (this.frameCanvas.width !== fr.cols || this.frameCanvas.height !== fr.rows) {
+      if (!this.imgData || this.frameCanvas.width !== fr.cols || this.frameCanvas.height !== fr.rows) {
         this.frameCanvas.width = fr.cols; this.frameCanvas.height = fr.rows;
         this.imgData = this.frameCtx.createImageData(fr.cols, fr.rows);
       }
@@ -402,8 +405,7 @@
       const zoomStr = (this.scale / (this.frame ? Math.min(this.el.clientWidth / this.frame.cols, this.el.clientHeight / this.frame.rows) : 1)).toFixed(2);
       let probeStr = '';
       if (this.probeInfo && this.frame) {
-        const instH = this._curInst || this.stack.instCache.get(this.image.file.sop);
-        const unit = instH && instH.ds.p && instH.ds.p.intercept ? ' HU' : '';
+        const unit = this._huUnit();
         probeStr = '<br>(' + this.probeInfo.x + ', ' + this.probeInfo.y + ') ' + Math.round(this.probeInfo.v) + unit;
       }
       c.bl.innerHTML =
@@ -552,11 +554,17 @@
       const mean = sum / n, sd = Math.sqrt(Math.max(0, sum2 / n - mean * mean));
       return { label: area + '  均值 ' + mean.toFixed(1) + ' ±' + sd.toFixed(1), mean, sd, mn, mx, n };
     }
+    /** HU 只属于 CT: 按截距是否非零判断会让截距为 0 的 CT 丢单位、带截距的 MR/PET 误标 HU */
+    _huUnit() {
+      const inst = this._curInst || (this.stack && this.stack.instCache.get(this.image.file.sop));
+      const mod = (inst && inst.ds.str(MV.TAG.Modality)) || (this.stack && this.stack.info.modality) || '';
+      return String(mod).toUpperCase() === 'CT' ? ' HU' : '';
+    }
+
     _probeVal(a) {
       const p = a.pts[0];
       const v = this._effAt(p.x, p.y);
-      const inst = this._curInst || this.stack.instCache.get(this.image.file.sop);
-      const unit = inst && inst.ds.p && inst.ds.p.intercept ? ' HU' : '';
+      const unit = this._huUnit();
       return (isFinite(v) ? v.toFixed(0) : '?') + unit + ' (' + Math.round(p.x) + ',' + Math.round(p.y) + ')';
     }
 
@@ -926,7 +934,8 @@
     /** 区域内有效值 2%~98% 分位(大区域下采样; 返回 null=无法计算) */
     _voiStats(x0, y0, x1, y1) {
       if (!this.frame) return null;
-      const inst = this.stack.instCache.get(this.image.file.sop);
+      // 同 buildLUT: 用当前帧强引用(MPR 装载会把它挤出 LRU, 退回默认参数会丢掉 CT 截距 -1024)
+      const inst = this._curInst || this.stack.instCache.get(this.image.file.sop);
       const p = inst ? inst.ds.p : null;
       const src = this.frame.pixels;
       const cols = this.frame.cols;
@@ -1100,7 +1109,7 @@
     /** 成对子序列(如 DWI [1/2]/[2/2])同步: 其他视口加载同基础 UID 序列时, 跟随当前层号与窗宽窗位.
      *  窗宽窗位不做绝对值复制 —— 拆分子序列的灰度区间常不同(如 DWI b0/b1000, 且共享同一套
      *  DICOM 窗 tags), 复制会让一边过暗/过亮; 改为按各自序列 2%~98% 分位范围线性映射 */
-    _syncSiblings(pane) {
+    _syncSiblings(pane, pullOnly) {
       if (this._syncing) return;
       this._syncing = true;
       try {
@@ -1118,12 +1127,13 @@
             pane.render();
           }
         }
+        if (pullOnly) return;
         sibs.forEach((p) => {
           const m = mapVoi(pane, p);
           if (m) {
             if (p.imgIdx !== pane.imgIdx) {
               p._userVoi = true; p.ww = m.ww; p.wl = m.wl;
-              p.showImage(pane.imgIdx);
+              p.showImage(pane.imgIdx, false, true);
               p.render();
             } else if (Math.abs(p.ww - m.ww) > 1e-6 || Math.abs(p.wl - m.wl) > 1e-6) {
               p._userVoi = true; p.ww = m.ww; p.wl = m.wl;
@@ -1133,7 +1143,7 @@
             // 目标帧未就绪等无法映射: 先按绝对值跟随, 待其就绪后重映射
             p._userVoi = true; p.ww = pane.ww; p.wl = pane.wl;
             if (!p.frame) p._voiSyncPending = true;
-            if (p.imgIdx !== pane.imgIdx) p.showImage(pane.imgIdx); else p.render();
+            if (p.imgIdx !== pane.imgIdx) p.showImage(pane.imgIdx, false, true); else p.render();
           }
         });
       } finally { this._syncing = false; }

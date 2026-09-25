@@ -183,6 +183,32 @@
    * 解码一个实例 → 惰性帧访问器
    * 返回 { getFrame(i)→Promise<{pixels,kind,rows,cols}>, frames, kind, stats }
    */
+  /** 封装像素各帧在 flat(各片段去掉 8 字节 item 头后拼接)中的起点.
+   *  BOT 偏移从首个片段的 item 头起算、含每个 item 头, 需换算到 flat 坐标(直接使用会让第 i 帧错位 8×i 字节);
+   *  无 BOT(或无法对齐)且片段数 == 帧数时按一帧一片段; 其余情况整体视为一帧 */
+  function encapsulatedFrameStarts(pix, N) {
+    const frags = pix.fragments || [], bot = pix.bot || [];
+    const flatAtItem = new Map();
+    let io = 0, fo = 0;
+    frags.forEach((f) => { flatAtItem.set(io, fo); io += 8 + f.len; fo += f.len; });
+    if (N > 1 && bot.length >= N) {
+      const starts = [];
+      for (let i = 0; i < N; i++) {
+        const s = flatAtItem.get(bot[i]);
+        if (s === undefined) break;
+        starts.push(s);
+      }
+      if (starts.length === N) return starts.sort((a, b) => a - b);
+    }
+    if (N > 1 && frags.length === N) {
+      const starts = [];
+      let acc = 0;
+      frags.forEach((f) => { starts.push(acc); acc += f.len; });
+      return starts;
+    }
+    return [0];
+  }
+
   async function decodeInstance(ds) {
     const p = ds.p;
     if (!p || !p.rows || !p.cols) throw new Error('缺少像素数据');
@@ -199,27 +225,18 @@
       let fp = 0;
       ds.pixel.fragments.forEach((f) => { flat.set(u8.subarray(f.off, f.off + f.len), fp); fp += f.len; });
 
-      const frameStarts = [];
-      if (N > 1 && ds.pixel.bot && ds.pixel.bot.length >= N) {
-        for (let i = 0; i < N; i++) frameStarts.push(ds.pixel.bot[i]);
-        frameStarts.sort((a, b) => a - b);
-      } else frameStarts.push(0);
+      const frameStarts = encapsulatedFrameStarts(ds.pixel, N);
 
       if (ts === TS.RLE) {
         const bytesAlloc = Math.ceil(p.bitsAllocated / 8);
         const frameLen = p.rows * p.cols * p.samples * bytesAlloc;
-        // RLE 每帧有独立头;bot 给出各帧起始(相对 firstData)
-        const startsAbs = [];
-        if (N > 1 && ds.pixel.bot && ds.pixel.bot.length >= N) {
-          ds.pixel.bot.forEach((o) => startsAbs.push((ds.pixel.firstDataOff - ds.pixel.firstDataOff) + o)); // 相对 flat 起点
-        } else startsAbs.push(0);
         const kind = p.isColor ? 'rgb' : 'gray16';
         const cache = {};
         return {
           frames: N, kind, rows: p.rows, cols: p.cols,
           getFrame: async function (i) {
             if (cache[i]) return cache[i];
-            const abs = startsAbs[Math.min(i, startsAbs.length - 1)];
+            const abs = frameStarts[Math.min(i, frameStarts.length - 1)];
             const raw = decodeRLEFrame(ds, flat, abs, frameLen, p.rows, p.cols, p.samples, bytesAlloc);
             let pixels;
             if (p.isColor) {
@@ -274,7 +291,7 @@
           if (preferLS) {
             try { return await decodeJpegLS(bytes); } catch (e) { return decodeJpegLossless(bytes); }
           }
-          try { return decodeJpegLossless(bytes); } catch (e) { return decodeJpegLS(bytes); }
+          try { return await decodeJpegLossless(bytes); } catch (e) { return decodeJpegLS(bytes); }
         };
         return {
           frames: frameStarts.length, kind: isMono ? (p.bitsAllocated === 8 ? 'gray8' : 'gray16') : 'rgb',

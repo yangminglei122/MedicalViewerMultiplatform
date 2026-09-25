@@ -19,6 +19,12 @@
         const r = await fetch(this.base() + '?action=ping', { credentials: 'same-origin' });
         if (r.status === 401) { this.serverMode = true; this.needLogin = true; return false; }
         const j = await r.json();
+        if (j && j.error) {
+          // 后端存在但出错(如账号文件损坏): 不能当成无后端的本地模式, 明示错误并停在登录页
+          this.serverMode = true; this.needLogin = true;
+          U.toast('服务器错误: ' + j.error, 'error', 15000);
+          return false;
+        }
         this.serverMode = !!(j && j.server);
         this.auth = !!(j && j.auth);
         this.user = (j && j.user) || null;
@@ -31,6 +37,9 @@
         return false;
       }
     },
+
+    /** 导入权限: 服务器模式仅管理员(临时账号只用于阅片); 本地模式可导入预览 */
+    canImport() { return !this.serverMode || this.role === 'admin'; },
 
     async login(user, pass) {
       const r = await this.post('login', null, { user, pass });

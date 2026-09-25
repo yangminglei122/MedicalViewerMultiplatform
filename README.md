@@ -56,7 +56,7 @@ Web Station → **脚本语言设置** → PHP 7.4 或 8.x,建议:
 浏览器打开 `http://群晖IP/medicalviewer/`。手机同样地址;可「添加到主屏幕」当 App 用(已适配移动端布局:序列侧栏变抽屉、工具栏横向滑动、双指缩放平移)。
 
 ### 建议加固(按需)
-- **账号系统(内置)**:所有访问都需要登录。首次部署自动创建管理员 **admin / admin**,请登录后立即在顶栏「账号管理」中修改密码;管理员可创建/删除**临时账号**并设定有效期(1 天~1 年),到期自动失效(登录中与后续请求均拒绝),支持续期(+7 天)与改密。账号存储在 `data/accounts.json`(密码为单向哈希)。
+- **账号系统(内置)**:所有访问都需要登录。首次部署自动创建管理员 **admin / admin**,请登录后立即在顶栏「账号管理」中修改密码;管理员可创建/删除**临时账号**并设定有效期(1 天~1 年;临时账号只能阅片:导出需单独授权,不能导入、删除或编辑),到期自动失效(登录中与后续请求均拒绝),支持续期(+7 天)与改密。账号存储在 `data/accounts.json`(密码为单向哈希);该文件损坏时系统会拒绝登录并提示,请从备份恢复,确需重置可删除它(将重建默认管理员 admin/admin)。
 - **HTTPS**:DSM 控制面板 → 登录门户 → 高级 → 反向代理,把 `medicalviewer.你的域名` → `http://localhost/medicalviewer/`,并套用 DSM 证书;手机在公网访问务必走 HTTPS;
 - 若 Web Station 后端为 **Apache**,`data/` 已自动放置 `.htaccess` 禁止直接访问;若为 **Nginx**,DICOM 文件虽不可枚举(文件名为 UID),稳妥起见可将 `config.php` 中 `MV_DATA_DIR` 指向 web 之外的目录,如 `/volume1/medicalviewer-data`(需先创建并按第 4 步授权)。
 
@@ -105,8 +105,8 @@ php -S 0.0.0.0:8160 -d upload_max_filesize=2048M -d post_max_size=2100M -d max_i
 - 换新 NAS/迁移:整个目录拷走即可。
 
 ## 已知限制
-- JPEG 2000 / JPEG-LS 压缩的 DICOM 需先在工作站转为未压缩或普通 JPEG;
-- 多帧封装 JPEG 的帧定位依赖 Basic Offset Table(绝大多数设备提供);
+- JPEG 2000 压缩的 DICOM 需先在工作站转为未压缩 / JPEG / JPEG-LS;
+- 多帧封装图像的帧定位使用 Basic Offset Table, 缺失时按"一帧一片段"定位(绝大多数设备满足其一);
 - 容量建议:数万幅图像(约 20–50GB)内响应良好;更大规模建议按年份分目录部署多套;
 - Chrome/Edge/Safari 近年版本均可;IE 不支持。
 

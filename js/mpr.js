@@ -71,8 +71,31 @@
     if (!(sz > 0.01)) sz = Math.abs(p0.thickness || 0);
     if (!(sz > 0.01)) sz = 1;
 
-    // 按层序构建体数据
-    const vol = new Float32Array(nx * ny * imgs.length);
+    // 重排到标准解剖方位: X→患者左, Y→患者后, Z→足侧(第 0 层 = 最头侧, 冠/矢状图头在上).
+    // 源轴 0=列(IOP 行向量) 1=行(IOP 列向量) 2=层(法线, 已按投影升序); 各取主导的患者轴与方向.
+    // 不重排时(升序层=足→头)冠/矢状上下颠倒, 且矢状/冠状位采集的三视图标签全部错位.
+    const nzSrc = imgs.length;
+    const srcN = [nx, ny, nzSrc], srcS = [sx, sy, sz];
+    const dirs = [iop0.slice(0, 3), iop0.slice(3, 6), nrm];
+    let axisOf = [0, 1, 2], flip = [false, false, false];   // 源轴 a → 目标轴 axisOf[a]
+    if (hasProj) {
+      const dom = dirs.map((d) => { let c = 0; for (let q = 1; q < 3; q++) if (Math.abs(d[q]) > Math.abs(d[c])) c = q; return c; });
+      if (new Set(dom).size === 3) {   // 大角度斜切时主导轴可能重复, 保持原排列
+        axisOf = dom;
+        flip = dirs.map((d, a) => (dom[a] === 2 ? d[2] > 0 : d[dom[a]] < 0));
+      }
+    }
+    const N = [0, 0, 0], S = [0, 0, 0];
+    for (let a = 0; a < 3; a++) { N[axisOf[a]] = srcN[a]; S[axisOf[a]] = srcS[a]; }
+    const tStride = [1, N[0], N[0] * N[1]];
+    let base0 = 0;
+    const st = [0, 0, 0];
+    for (let a = 0; a < 3; a++) {
+      const ts = tStride[axisOf[a]];
+      if (flip[a]) { base0 += (srcN[a] - 1) * ts; st[a] = -ts; } else st[a] = ts;
+    }
+
+    const vol = new Float32Array(nx * ny * nzSrc);
     for (let i = 0; i < order.length; i++) {
       const k = order[i];
       const inst = zsInfo.length ? zsInfo[hasProj ? i : k].inst : await stack.instance(imgs[k].file);
@@ -81,11 +104,14 @@
       const dsP = inst.ds.p || {};
       const sl = dsP.slope || 1, it = dsP.intercept || 0, sg = !!dsP.signed;
       const src = f.pixels;
-      const base = i * nx * ny;
-      for (let j = 0; j < nx * ny; j++) {
-        let v = src[j];
-        if (sg && v > 32767) v -= 65536;
-        vol[base + j] = v * sl + it;
+      const sliceBase = base0 + i * st[2];
+      for (let r = 0, j = 0; r < ny; r++) {
+        let o = sliceBase + r * st[1];
+        for (let c = 0; c < nx; c++, j++, o += st[0]) {
+          let v = src[j];
+          if (sg && v > 32767) v -= 65536;
+          vol[o] = v * sl + it;
+        }
       }
       if (onProgress && (i % 8 === 0 || i === order.length - 1)) onProgress((i + 1) / order.length);
     }
@@ -96,7 +122,7 @@
       for (let i = 0; i < vol.length; i += 29) { const v = vol[i]; if (v < mn) mn = v; if (v > mx) mx = v; }
       wc = (mn + mx) / 2; ww = Math.max(1, mx - mn);
     }
-    return { vol, nx, ny, nz: imgs.length, sx, sy, sz, wc, ww };
+    return { vol, nx: N[0], ny: N[1], nz: N[2], sx: S[0], sy: S[1], sz: S[2], wc, ww };
   }
 
   /* ============ 单个 MPR 视图 ============ */
@@ -363,9 +389,14 @@
     }
 
     setActive(pl) {
+      const changed = this.active !== pl;
       this.active = pl;
       this.planes.forEach((p) => p.el.classList.toggle('active', p === pl));
+      if (changed) this._changed();
     }
+
+    /** 通知外部(底部滑条/状态栏): 激活平面或定位已变化 */
+    _changed() { if (this.vol && this.opts.onchange) this.opts.onchange(this); }
 
     /** 移动平面索引(axial→z, coronal→y, sagittal→x), 并同步渲染全部 */
     nudge(plane, dir) {
@@ -373,6 +404,7 @@
       const max = key === 'z' ? this.vol.nz : key === 'y' ? this.vol.ny : this.vol.nx;
       this.cross[key] = U.clamp(this.cross[key] + dir, 0, max - 1);
       this.renderAll();
+      this._changed();
     }
 
     /** 由某平面的像素坐标设置十字线(其余两轴) */
@@ -383,9 +415,10 @@
       this.cross[d.ax] = x;
       this.cross[d.ay] = y;
       this.renderAll();
+      this._changed();
     }
 
-    applyVoi(wc, ww) { this.wc = wc; this.ww = ww; this.renderAll(); }
+    applyVoi(wc, ww) { this.wc = wc; this.ww = ww; this.renderAll(); this._changed(); }
     invertToggle() { this.invert = !this.invert; this.renderAll(); }
     renderAll() { this.planes.forEach((p) => p.render()); }
 

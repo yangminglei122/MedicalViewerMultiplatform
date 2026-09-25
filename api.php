@@ -13,7 +13,7 @@
 error_reporting(E_ALL & ~E_DEPRECATED & ~E_NOTICE);
 // JSON API 严禁任何警告/通知直接输出污染响应体(错误仍写服务器日志)
 @ini_set('display_errors', '0');
-define('MV_VERSION', '1.7.4');
+define('MV_VERSION', '1.7.5');
 
 $__dir = __DIR__;
 if (is_file($__dir . '/config.php')) require_once $__dir . '/config.php';
@@ -22,6 +22,7 @@ define('MV_TMP_DIR', MV_DATA_DIR . '/tmp');
 define('MV_FILES_DIR', MV_DATA_DIR . '/files');
 define('MV_INDEX_FILE', MV_DATA_DIR . '/index.json');
 define('MV_GC_HOURS', 24);
+define('MV_SPLIT_MIN_POS', 3);   // 交织拆分所需最少不同层位数(与 js/import.js 保持一致)
 
 header('X-Content-Type-Options: nosniff');
 
@@ -128,9 +129,12 @@ function mv_accounts_path() { return MV_DATA_DIR . '/accounts.json'; }
 function mv_load_accounts() {
     $p = mv_accounts_path();
     if (is_file($p)) {
-        $a = json_decode((string)file_get_contents($p), true);
+        $a = json_decode((string)@file_get_contents($p), true);
         if (is_array($a) && count($a)) return $a;
+        // 文件存在但损坏/为空: 报错而不是重建 —— 重建会丢掉全部账号并让默认 admin/admin 重新生效
+        mv_fail('账号文件 accounts.json 损坏, 已拒绝访问。请从备份恢复该文件; 若确需重置, 删除它后将重建默认管理员 admin/admin', 500);
     }
+    // 仅首次部署(文件不存在)创建默认管理员
     $defUser = (defined('MV_USER') && MV_USER !== '') ? MV_USER : 'admin';
     $defPass = (defined('MV_PASS') && MV_PASS !== '') ? MV_PASS : 'admin';
     $a = array($defUser => array(
@@ -142,8 +146,10 @@ function mv_load_accounts() {
 }
 function mv_save_accounts($a) {
     $tmp = mv_accounts_path() . '.tmp';
-    @file_put_contents($tmp, json_encode($a, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), LOCK_EX);
-    @rename($tmp, mv_accounts_path());
+    $json = json_encode($a, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if ($json === false || @file_put_contents($tmp, $json, LOCK_EX) === false || !@rename($tmp, mv_accounts_path())) {
+        mv_fail('账号文件写入失败(检查 data 目录权限)', 500);
+    }
 }
 function mv_account_expired($acc) {
     $e = isset($acc['expires']) ? $acc['expires'] : '';
@@ -334,27 +340,46 @@ function mv_zip_stream_out($files, $zipName) {
         $nl = strlen($name);
         $dt = mv_dos_time(filemtime($f['path']));
 
+        // ZIP64: 单文件 ≥4GB 或偏移 ≥4GB 时, 32 位字段置 0xFFFFFFFF, 真值放入 0x0001 扩展字段
+        $bigSize = $size >= 0xFFFFFFFF;
+        $bigOff = $offset >= 0xFFFFFFFF;
+        $ver = ($bigSize || $bigOff) ? 45 : 20;
+        $size32 = $bigSize ? 0xFFFFFFFF : $size;
+        $lExtra = $bigSize ? pack('vvPP', 0x0001, 16, $size, $size) : '';
+
         // 本地文件头: 标志 0x0800 = UTF-8 文件名, STORE 方式
         $local = "PK\x03\x04"
-            . pack('vvv', 0x0014, 0x0800, 0) . $dt
-            . $crcBin . pack('VVvv', $size, $size, $nl, 0)
-            . $name;
+            . pack('vvv', $ver, 0x0800, 0) . $dt
+            . $crcBin . pack('VVvv', $size32, $size32, $nl, strlen($lExtra))
+            . $name . $lExtra;
         fwrite($out, $local);
         $fp = fopen($f['path'], 'rb');
         while (!feof($fp)) { $b = fread($fp, 1048576); if ($b !== '' && $b !== false) fwrite($out, $b); }
         fclose($fp);
 
+        $cExtraBody = ($bigSize ? pack('PP', $size, $size) : '') . ($bigOff ? pack('P', $offset) : '');
+        $cExtra = $cExtraBody !== '' ? pack('vv', 0x0001, strlen($cExtraBody)) . $cExtraBody : '';
         $central .= "PK\x01\x02"
-            . pack('vvvv', 0x031E, 0x0014, 0x0800, 0) . $dt
-            . $crcBin . pack('VVvv', $size, $size, $nl, 0)
-            . pack('vvvVV', 0, 0, 0, 0, $offset)
-            . $name;
+            . pack('vvvv', 0x0300 | $ver, $ver, 0x0800, 0) . $dt
+            . $crcBin . pack('VVvv', $size32, $size32, $nl, strlen($cExtra))
+            . pack('vvvVV', 0, 0, 0, 0, $bigOff ? 0xFFFFFFFF : $offset)
+            . $name . $cExtra;
         $offset += strlen($local) + $size;
         $count++;
     }
     fwrite($out, $central);
     $cdSize = strlen($central);
-    fwrite($out, "PK\x05\x06" . pack('vvvvVVv', 0, 0, $count, $count, $cdSize, $offset, 0));
+    $cdOff = $offset;
+    if ($count >= 0xFFFF || $cdSize >= 0xFFFFFFFF || $cdOff >= 0xFFFFFFFF) {
+        // ZIP64 目录尾 + 定位器(文件数 ≥65535 或总量 ≥4GB)
+        $z64Off = $cdOff + $cdSize;
+        fwrite($out, "PK\x06\x06" . pack('PvvVVPPPP', 44, 45, 45, 0, 0, $count, $count, $cdSize, $cdOff));
+        fwrite($out, "PK\x06\x07" . pack('VPV', 0, $z64Off, 1));
+        fwrite($out, "PK\x05\x06" . pack('vvvvVVv', 0, 0, min($count, 0xFFFF), min($count, 0xFFFF),
+            min($cdSize, 0xFFFFFFFF), min($cdOff, 0xFFFFFFFF), 0));
+    } else {
+        fwrite($out, "PK\x05\x06" . pack('vvvvVVv', 0, 0, $count, $count, $cdSize, $cdOff, 0));
+    }
     fclose($out);
     exit;
 }
@@ -421,7 +446,8 @@ function mv_split_interleaved($se, $filesOut, $posList) {
         $occ[$i] = $c;
         if ($c > $maxOcc) $maxOcc = $c;
     }
-    if ($maxOcc < 2) return array(array('uid' => $se['uid'], 'desc' => $se['desc'], 'files' => $filesOut));
+    // 不同层位 < 3 不是多层容积(定位像 SURVEY/PCA、Motion Curve 等同位多幅), 不拆
+    if ($maxOcc < 2 || count($seen) < MV_SPLIT_MIN_POS) return array(array('uid' => $se['uid'], 'desc' => $se['desc'], 'files' => $filesOut));
     $out = array();
     for ($o = 1; $o <= $maxOcc; $o++) {
         $sub = array();
@@ -633,6 +659,7 @@ try {
         }
 
         case 'chunk': {
+            mv_need_admin();   // 导入仅管理员: 临时账号只用于阅片
             // 分块上传: 大文件按 8MB 切块逐个 POST, 规避超大单请求(慢且易超时)
             // 参数: batch, kind=zip|file, name, index, total; 文件字段 chunk
             if (empty($_FILES['chunk'])) mv_fail('未收到数据块');
@@ -695,6 +722,7 @@ try {
         }
 
         case 'tmpbegin': {
+            mv_need_admin();   // 导入仅管理员: 临时账号只用于阅片
             $batch = bin2hex(random_bytes(8));
             if (!@mkdir(MV_TMP_DIR . '/' . $batch, 0770, true)) mv_fail('暂存目录创建失败', 500);
             mv_json(array('batch' => $batch));
@@ -702,6 +730,7 @@ try {
         }
 
         case 'tmpfile': {
+            mv_need_admin();   // 导入仅管理员: 临时账号只用于阅片
             // POST 整体超限时 PHP 会丢弃所有 POST/FILES 数据
             if (empty($_POST) && empty($_FILES) && isset($_SERVER['CONTENT_LENGTH']) && (int)$_SERVER['CONTENT_LENGTH'] > 0) {
                 mv_fail('上传数据超过 PHP post_max_size(' . ini_get('post_max_size') . '),请在 Web Station PHP 设置中调大');
@@ -745,6 +774,7 @@ try {
         }
 
         case 'tmpzip': {
+            mv_need_admin();   // 导入仅管理员: 临时账号只用于阅片
             if (empty($_FILES['file'])) mv_fail('未收到文件');
             $uf = $_FILES['file'];
             if ($uf['error'] === UPLOAD_ERR_INI_SIZE || $uf['error'] === UPLOAD_ERR_FORM_SIZE) {
@@ -762,21 +792,31 @@ try {
         }
 
         case 'tmpmeta': {
+            mv_need_admin();   // 导入仅管理员: 临时账号只用于阅片
             $batch = isset($_GET['batch']) ? $_GET['batch'] : '';
             $id = isset($_GET['id']) ? $_GET['id'] : '';
+            // len=0: 整个文件(本地预览需完整像素数据); 否则只读头部前 len 字节(导入解析)
             $len = isset($_GET['len']) ? (int)$_GET['len'] : 524288;
             if (!mv_check_id($batch) || !mv_check_id($id)) mv_fail('非法参数');
-            $len = max(1024, min($len, 16777216));
             $path = MV_TMP_DIR . '/' . $batch . '/' . $id . '.dcm';
             if (!is_file($path)) mv_fail('文件不存在', 404);
+            $size = filesize($path);
+            $len = $len <= 0 ? $size : max(1024, min($len, 16777216, $size));
             header('Content-Type: application/octet-stream');
+            header('Content-Length: ' . $len);
             $fp = fopen($path, 'rb');
-            echo fread($fp, $len);
+            for ($left = $len; $left > 0 && !feof($fp); ) {
+                $b = fread($fp, min(1048576, $left));
+                if ($b === false || $b === '') break;
+                echo $b;
+                $left -= strlen($b);
+            }
             fclose($fp);
             exit;
         }
 
         case 'commit': {
+            mv_need_admin();   // 导入仅管理员: 临时账号只用于阅片
             $j = mv_body_json();
             $defBatch = isset($j['batch']) ? $j['batch'] : '';
             $studies = isset($j['studies']) ? $j['studies'] : array();
@@ -881,6 +921,7 @@ try {
         }
 
         case 'delete-study': {
+            mv_need_admin();   // 删除/编辑仅管理员: 临时账号用于分享阅片, 不应能删改数据
             $j = mv_body_json();
             $sid = isset($j['sid']) ? $j['sid'] : '';
             $uid = isset($j['uid']) ? $j['uid'] : '';
@@ -908,6 +949,7 @@ try {
         }
 
         case 'delete-patient': {
+            mv_need_admin();
             $j = mv_body_json();
             $dir = isset($j['dir']) ? $j['dir'] : '';
             if (!mv_check_id($dir)) mv_fail('非法参数');
@@ -926,6 +968,7 @@ try {
         }
 
         case 'edit-patient': {
+            mv_need_admin();
             $j = mv_body_json();
             $dir = isset($j['dir']) ? $j['dir'] : '';
             if (!mv_check_id($dir)) mv_fail('非法参数');
@@ -957,13 +1000,25 @@ try {
             $files = array();
             $zipBase = '';
             $count = 0;
-            $collect = function ($p, $st) use (&$files, &$count) {
+            $used = array();   // ZIP 内路径去重: 同号实例/缺失实例号/同名序列/同日同名检查 否则解压时互相覆盖丢图
+            $uniq = function ($name) use (&$used) {
+                $key = mv_mb_lower($name);
+                if (!isset($used[$key])) { $used[$key] = 1; return $name; }
+                $dot = strrpos($name, '.');
+                $stem = $dot === false ? $name : substr($name, 0, $dot);
+                $ext = $dot === false ? '' : substr($name, $dot);
+                do { $n = $stem . '_' . (++$used[$key]) . $ext; } while (isset($used[mv_mb_lower($n)]));
+                $used[mv_mb_lower($n)] = 1;
+                return $n;
+            };
+            $collect = function ($p, $st) use (&$files, &$count, $uniq) {
+                $stDir = mv_safe_name($p['id'] !== '' ? $p['id'] : $p['name']) . '/' . mv_safe_name($st['date'] . ' ' . $st['desc']);
                 foreach ($st['series'] as $se) {
                     $seDir = mv_safe_name(($se['number'] !== '' ? sprintf('%02d', (int)$se['number']) . '-' : '') . ($se['desc'] !== '' ? $se['desc'] : $se['uid']));
                     foreach ($se['files'] as $f) {
                         $path = MV_FILES_DIR . '/' . $p['dir'] . '/' . $st['sdir'] . '/' . mv_safe_uid($se['uid']) . '/' . $f['f'] . '.dcm';
                         if (!is_file($path)) continue;
-                        $files[] = array('path' => $path, 'name' => mv_safe_name($p['id'] !== '' ? $p['id'] : $p['name']) . '/' . mv_safe_name($st['date'] . ' ' . $st['desc']) . '/' . $seDir . '/' . sprintf('%06d', (int)$f['no']) . '.dcm');
+                        $files[] = array('path' => $path, 'name' => $uniq($stDir . '/' . $seDir . '/' . sprintf('%06d', (int)$f['no']) . '.dcm'));
                         $count++;
                     }
                 }
@@ -976,7 +1031,8 @@ try {
                     if ($sid === '' && $uid !== '' && $st['uid'] !== $uid) continue;
                     if ($sid === '' && $uid !== '') { $uidHits++; if ($uidHits > 1) mv_fail('该检查号在多个患者下存在, 请从列表导出', 400); }
                     $collect($p, $st);
-                    if ($zipBase === '') $zipBase = ($uid !== '' ? $p['name'] . '_' . $st['date'] . '_' . $st['desc'] : $p['name'] . '_全部检查');
+                    // 单检查导出(sid/uid)按检查命名; 仅按患者目录导出才是"全部检查"
+                    if ($zipBase === '') $zipBase = ($sid !== '' || $uid !== '') ? $p['name'] . '_' . $st['date'] . '_' . $st['desc'] : $p['name'] . '_全部检查';
                 }
             }
             if ($count === 0) mv_fail('没有可导出的文件', 404);

@@ -200,9 +200,9 @@
       ]),
       U.el('div', { class: 'wl-pat-stats muted', text: studies.length + ' 次检查 · ' + totalInst + ' 幅' }),
       U.el('div', { class: 'row-actions' }, [
-        iconBtn('edit', '编辑患者信息', (e) => { e.stopPropagation(); editPatient(p); }),
+        isAdmin() ? iconBtn('edit', '编辑患者信息', (e) => { e.stopPropagation(); editPatient(p); }) : null,
         (MV.api.canExport !== false) ? iconBtn('download', '导出全部检查', (e) => { e.stopPropagation(); location.href = MV.api.exportPatientUrl(p.dir); }) : null,
-        iconBtn('trash', '删除患者', async (e) => {
+        isAdmin() ? iconBtn('trash', '删除患者', async (e) => {
           e.stopPropagation();
           if (await U.confirm('删除患者', '确定删除患者「' + U.esc(p.name || '未知') + '」及其<b>全部 ' + studies.length + ' 次检查</b>?<br>所有原始 DICOM 文件将被删除,不可恢复。', { okText: '全部删除', danger: true })) {
             try {
@@ -211,7 +211,7 @@
               refresh();
             } catch (err) { U.toast('删除失败: ' + err.message, 'error'); }
           }
-        })
+        }) : null
       ])
     ]);
 
@@ -235,7 +235,7 @@
       U.el('span', { class: 'wl-counts muted', text: st.seriesCount + ' / ' + st.instanceCount }),
       U.el('span', { class: 'wl-actions' }, [
         (MV.api.canExport !== false) ? iconBtn('download', '导出 DICOM ZIP', (e) => { e.stopPropagation(); location.href = MV.api.exportStudyUrl(st.sid || st.uid); }) : null,
-        iconBtn('trash', '删除检查', async (e) => {
+        isAdmin() ? iconBtn('trash', '删除检查', async (e) => {
           e.stopPropagation();
           if (await U.confirm('删除检查', '确定删除「' + U.esc(st.desc || '未命名检查') + '」(' + U.fmtDate(st.date) + ')?<br>原始 DICOM 文件将一并删除,不可恢复。', { okText: '删除', danger: true })) {
             try {
@@ -244,7 +244,7 @@
               refresh();
             } catch (err) { U.toast('删除失败: ' + err.message, 'error'); }
           }
-        })
+        }) : null
       ])
     ]);
 
@@ -318,6 +318,9 @@
     const fb = U.$('#wl-filter');
     if (fb) fb.innerHTML = '';
   }
+
+  /** 删除/编辑仅管理员可见(后端同样校验) */
+  function isAdmin() { return MV.api.role === 'admin'; }
 
   function iconBtn(icon, title, onclick) {
     return U.el('button', { class: 'icon-btn', title: title, html: U.icon(icon, 17), onclick });

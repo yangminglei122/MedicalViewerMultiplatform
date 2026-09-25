@@ -133,7 +133,9 @@
             it._occ = c;
             if (c > maxOcc) maxOcc = c;
           });
-          if (maxOcc < 2) { newMap.set(seUid, se); return; }
+          // 不同层位 < 3 不是多层容积(定位像 SURVEY/PCA、Motion Curve 等同位多幅), 不拆(与 api.php MV_SPLIT_MIN_POS 一致)
+          // 缺层位(ImagePositionPatient)的不拆, 与服务端一致
+          if (maxOcc < 2 || seen.size < 3 || items.some((it) => it.posKey.startsWith('no:'))) { newMap.set(seUid, se); return; }
           // 拆成 maxOcc 个子序列
           for (let o = 1; o <= maxOcc; o++) {
             const sub = items.filter((it) => it._occ === o);
@@ -628,33 +630,11 @@
     }
   }
 
-  /** 由组构建本地预览用的 study 对象 */
-  function groupToLocalStudy(group, batch) {
-    const series = [];
-    let firstStudy = null;
-    group.studies.forEach((st) => {
-      if (!firstStudy) firstStudy = st;
-      st.series.forEach((se) => {
-        const files = se.items.map((it) => ({
-          sop: it.sop, instNo: it.no, frames: it.frames,
-          blob: it.blob || null, stagedId: it.stagedId || null,
-          getBytes: async function () {
-            if (this.blob) return new Uint8Array(await this.blob.arrayBuffer());
-            return MV.api.tmpMeta(batch, this.stagedId, 32 * 1024 * 1024);
-          }
-        }));
-        series.push({ uid: se.uid, number: se.number, desc: se.desc, modality: se.modality, files });
-      });
-    });
-    return {
-      patient: group.patient,
-      study: { desc: firstStudy ? firstStudy.desc : '本地预览', series }
-    };
-  }
-
   MV.import = {
     // 兜底: 无论流程如何结束, 关闭所有遗留的进度弹窗
     start: async function (files) {
+      // 按钮/文件框/拖拽入口统一在此拦截
+      if (!MV.api.canImport()) { U.toast('当前账号仅可阅片, 导入需管理员账号', 'error'); return; }
       try { await start(files); }
       finally { activeProgress.slice().forEach((p) => p.close()); }
     },
