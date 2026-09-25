@@ -123,6 +123,7 @@
       this.imgIdx = 0;
       this.selected = -1; this.pendingAnno = null;
       this._defaultVoi = null; this._userVoi = false; this._invertTouched = false;
+      this._voiSyncPending = false;
       if (!keepView) {
         this.rot = 0; this.flipH = false; this.flipV = false;
         this.zoom = 1; this.pan = { x: 0, y: 0 };
@@ -735,6 +736,7 @@
         this.wl = d.wl + dy * 2;
         this._userVoi = true;
         this.render();
+        this.viewer._syncSiblings(this);
       } else if (d.mode === 'pan') {
         this.pan.x = d.pan.x + dx; this.pan.y = d.pan.y + dy;
         this.render();
@@ -907,6 +909,7 @@
           this.ww = Math.max(1, this.ww + d * 20);
           this._userVoi = true;
           this.render();
+          this.viewer._syncSiblings(this);
         } else {
           this.showImage(this.imgIdx + d);
         }
@@ -918,9 +921,9 @@
       this.autoVoiRegion(0, 0, this.frame ? this.frame.cols - 1 : 0, this.frame ? this.frame.rows - 1 : 0);
     }
 
-    /** ROI 区域直方图自动窗宽窗位(2%~98% 分位) */
-    autoVoiRegion(x0, y0, x1, y1) {
-      if (!this.frame) return;
+    /** 区域内有效值 2%~98% 分位(大区域下采样; 返回 null=无法计算) */
+    _voiStats(x0, y0, x1, y1) {
+      if (!this.frame) return null;
       const inst = this.stack.instCache.get(this.image.file.sop);
       const p = inst ? inst.ds.p : null;
       const src = this.frame.pixels;
@@ -929,7 +932,7 @@
       const slope = p ? p.slope : 1, inter = p ? p.intercept : 0;
       const xa = Math.max(0, Math.floor(Math.min(x0, x1))), xb = Math.min(this.frame.cols - 1, Math.ceil(Math.max(x0, x1)));
       const ya = Math.max(0, Math.floor(Math.min(y0, y1))), yb = Math.min(this.frame.rows - 1, Math.ceil(Math.max(y0, y1)));
-      if (xb <= xa || yb <= ya) return;
+      if (xb <= xa || yb <= ya) return null;
       // 收集有效值(大区域下采样)
       const vals = [];
       const step = Math.max(1, Math.floor(((xb - xa + 1) * (yb - ya + 1)) / 65536));
@@ -940,15 +943,33 @@
           vals.push(v * slope + inter);
         }
       }
-      if (vals.length < 16) return;
+      if (vals.length < 16) return null;
       vals.sort((a, b) => a - b);
       const q = (t) => vals[Math.min(vals.length - 1, Math.floor(t * (vals.length - 1)))];
-      const p2 = q(0.02), p98 = q(0.98);
-      this.wl = (p2 + p98) / 2;
-      this.ww = Math.max(1, p98 - p2);
+      return { p2: q(0.02), p98: q(0.98) };
+    }
+
+    /** 本序列有效值 2%~98% 分位范围(取当前帧, 缓存于 stack): 双屏同步调窗按各自灰度区间比例映射用 */
+    _voiRange() {
+      if (!this.stack || !this.frame || this.frame.kind === 'rgb') return null;
+      if (!this.stack._voiRange) {
+        const s = this._voiStats(0, 0, this.frame.cols - 1, this.frame.rows - 1);
+        if (!s || !(s.p98 > s.p2)) return null;
+        this.stack._voiRange = { lo: s.p2, hi: s.p98 };
+      }
+      return this.stack._voiRange;
+    }
+
+    /** ROI 区域直方图自动窗宽窗位(2%~98% 分位) */
+    autoVoiRegion(x0, y0, x1, y1) {
+      const s = this._voiStats(x0, y0, x1, y1);
+      if (!s) return;
+      this.wl = (s.p2 + s.p98) / 2;
+      this.ww = Math.max(1, s.p98 - s.p2);
       this._userVoi = true;
       this.render();
       this.viewer._notify();
+      this.viewer._syncSiblings(this);
     }
 
     reset() {
@@ -957,6 +978,7 @@
       this._userVoi = false; this._invertTouched = false;
       if (this._defaultVoi) { this.ww = this._defaultVoi.ww; this.wl = this._defaultVoi.wc; }
       this.fit();
+      this.viewer._syncSiblings(this);
     }
 
     applyVoi(wc, ww) {
@@ -964,6 +986,7 @@
       this._userVoi = true;
       this.render();
       this.viewer._notify();
+      this.viewer._syncSiblings(this);
     }
 
     exportPNG() {
@@ -976,6 +999,19 @@
       this.render(ctx, src.width, src.height);
       return out.toDataURL('image/png');
     }
+  }
+
+  /** 源视口窗宽窗位 → 目标视口: 按两个序列各自 2%~98% 分位有效值范围线性映射.
+   *  交织拆分子序列灰度区间不同(如 DWI b0/b1000), 绝对值复制会让一边过暗/过亮;
+   *  任一侧范围无法计算(帧未就绪/RGB)时返回 null, 调用方退回绝对值 */
+  function mapVoi(src, dst) {
+    const a = src._voiRange(), b = dst._voiRange();
+    if (!a || !b) return null;
+    const ra = a.hi - a.lo, rb = b.hi - b.lo;
+    if (!(ra > 0) || !(rb > 0)) return null;
+    const fc = (src.wl - a.lo) / ra;   // 窗位在范围中的相对位置
+    const fw = src.ww / ra;            // 窗宽占范围的比例
+    return { ww: Math.max(1, fw * rb), wl: b.lo + fc * rb };
   }
 
   /* ================= Viewer:布局与工具管理 ================= */
@@ -1059,20 +1095,43 @@
 
     setTool(t) { this.tool = t; }
 
-    /** 成对子序列(如 DWI [1/2]/[2/2])同步: 其他视口加载同基础 UID 序列时, 跟随当前层号与窗宽窗位 */
+    /** 成对子序列(如 DWI [1/2]/[2/2])同步: 其他视口加载同基础 UID 序列时, 跟随当前层号与窗宽窗位.
+     *  窗宽窗位不做绝对值复制 —— 拆分子序列的灰度区间常不同(如 DWI b0/b1000, 且共享同一套
+     *  DICOM 窗 tags), 复制会让一边过暗/过亮; 改为按各自序列 2%~98% 分位范围线性映射 */
     _syncSiblings(pane) {
       if (this._syncing) return;
       this._syncing = true;
       try {
         const base = baseUid(pane.stack && pane.stack.info.uid);
-        this.panes.forEach((p) => {
-          if (p === pane || !p.stack) return;
-          if (baseUid(p.stack.info.uid) !== base) return;
-          if (p.imgIdx !== pane.imgIdx || p.ww !== pane.ww || p.wl !== pane.wl) {
-            p._userVoi = true;
-            p.ww = pane.ww; p.wl = pane.wl;
-            p.showImage(pane.imgIdx);
-            p.render();
+        const sibs = this.panes.filter((p) => p !== pane && p.stack && baseUid(p.stack.info.uid) === base);
+        if (!sibs.length) return;
+        // 此前帧未就绪只收到绝对值窗: 帧就绪后从伙伴反向拉取映射窗
+        if (pane._voiSyncPending && pane.frame) {
+          const src = sibs.find((q) => q.frame);
+          const m = src && mapVoi(src, pane);
+          if (m) {
+            pane._voiSyncPending = false;
+            pane._userVoi = true;
+            pane.ww = m.ww; pane.wl = m.wl;
+            pane.render();
+          }
+        }
+        sibs.forEach((p) => {
+          const m = mapVoi(pane, p);
+          if (m) {
+            if (p.imgIdx !== pane.imgIdx) {
+              p._userVoi = true; p.ww = m.ww; p.wl = m.wl;
+              p.showImage(pane.imgIdx);
+              p.render();
+            } else if (Math.abs(p.ww - m.ww) > 1e-6 || Math.abs(p.wl - m.wl) > 1e-6) {
+              p._userVoi = true; p.ww = m.ww; p.wl = m.wl;
+              p.render();
+            }
+          } else if (p.imgIdx !== pane.imgIdx || p.ww !== pane.ww || p.wl !== pane.wl) {
+            // 目标帧未就绪等无法映射: 先按绝对值跟随, 待其就绪后重映射
+            p._userVoi = true; p.ww = pane.ww; p.wl = pane.wl;
+            if (!p.frame) p._voiSyncPending = true;
+            if (p.imgIdx !== pane.imgIdx) p.showImage(pane.imgIdx); else p.render();
           }
         });
       } finally { this._syncing = false; }
@@ -1117,13 +1176,14 @@
           p._userVoi = false;
           if (p._defaultVoi) { p.ww = p._defaultVoi.ww; p.wl = p._defaultVoi.wc; }
           p.render();
+          this._syncSiblings(p);
         });
       } else if (v === 'auto') {
         this._op((p) => p.autoVoi());
       } else if (v === 'wide') {
-        this._op((p) => { p.ww = Math.min(65535, p.ww * 2); p._userVoi = true; p.render(); });
+        this._op((p) => { p.ww = Math.min(65535, p.ww * 2); p._userVoi = true; p.render(); this._syncSiblings(p); });
       } else if (v === 'narrow') {
-        this._op((p) => { p.ww = Math.max(1, p.ww / 2); p._userVoi = true; p.render(); });
+        this._op((p) => { p.ww = Math.max(1, p.ww / 2); p._userVoi = true; p.render(); this._syncSiblings(p); });
       } else {
         this.preset(v[0], v[1]);
       }

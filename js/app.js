@@ -200,8 +200,16 @@
         case 'ArrowUp': v.step(-1); e.preventDefault(); break;
         case 'PageDown': v.step(10); e.preventDefault(); break;
         case 'PageUp': v.step(-10); e.preventDefault(); break;
-        case 'ArrowRight': v.activePane()._userVoi = true; v.activePane().wl += (e.shiftKey ? 50 : 10); v.activePane().render(); e.preventDefault(); break;
-        case 'ArrowLeft': v.activePane()._userVoi = true; v.activePane().wl -= (e.shiftKey ? 50 : 10); v.activePane().render(); e.preventDefault(); break;
+        case 'ArrowRight': case 'ArrowLeft': {
+          const ap = v.activePane();
+          if (ap && ap.stack) {
+            ap._userVoi = true;
+            ap.wl += (e.key === 'ArrowRight' ? 1 : -1) * (e.shiftKey ? 50 : 10);
+            ap.render();
+            v._syncSiblings(ap);
+          }
+          e.preventDefault(); break;
+        }
         case '+': case '=': v.zoomBy(1.2); break;
         case '-': v.zoomBy(1 / 1.2); break;
         case 'r': v.rotate(1); break;
